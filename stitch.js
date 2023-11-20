@@ -487,6 +487,14 @@ Stitch.Utils.Graph = class {
   }
 };
 
+Stitch.Utils.debounce = function (func, time = 0) {
+  var timer;
+  return function(event) {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(func, time, event);
+  };
+}
+
 class StitchRunTemaplate {
   constructor() {}
   getStitches(pixelsPerUnit) {}

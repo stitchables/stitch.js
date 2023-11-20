@@ -124,7 +124,13 @@
 			}
 
 			// draw the pattern
-			pattern.drawSvg(window.innerWidth, window.innerHeight);
+			let svg = pattern.drawSvg(window.innerWidth, window.innerHeight);
+
+			// redraw pattern as the window is resized
+			window.addEventListener("resize", Stitch.Utils.debounce(() => {
+				document.body.removeChild(svg);
+				svg = pattern.drawSvg(window.innerWidth, window.innerHeight);
+			}));
 
 			// create the function for stitchables output
 			function generateEmbroiderySVG(widthMM, heightMM) {
@@ -133,7 +139,7 @@
 
 			// print the string out to the console for testing
 			console.log(generateEmbroiderySVG(Stitch.Utils.inchesToMillimeters(2), Stitch.Utils.inchesToMillimeters(2)));
-			
+
 		</script>
 	</body>
 
