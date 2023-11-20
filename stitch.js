@@ -1,108 +1,141 @@
 let Stitch = {};
 
 Stitch.Pattern = class {
+
   constructor(vWidth, vHeight) {
     this.vWidth = vWidth;
     this.vHeight = vHeight;
     this.threads = [];
+    this.backgroundColor = [255, 255, 255];
   }
-  addThread(thread) {
-    this.threads.push(thread);
+
+  setBackgroundColor(red, green, blue) {
+    this.backgroundColor = [red, green, blue];
   }
-  adjustToOutputAspectRatio(width, height) {
-    if (width / height > this.vWidth / this.vHeight)
-      return { width: (this.vWidth / this.vHeight) * height, height: height };
-    else return { width: width, height: (this.vHeight / this.vWidth) * width };
+
+  addThread(red, green, blue) {
+    this.threads.push(new Stitch.Thread(red, green, blue));
+    return this.threads.slice(-1)[0];
   }
-  drawSvg(
-    pxWidth,
-    pxHeight,
-    sigFigs = 5,
-    namespace = "http://www.w3.org/2000/svg"
-  ) {
-    let dimensions = this.adjustToOutputAspectRatio(pxWidth, pxHeight);
+
+  drawSvg(pxWidth, pxHeight, sigFigs = 5, namespace = "http://www.w3.org/2000/svg") {
+
+    // calculate the aspect ratio adjustment
+    let dimensions = pxWidth / pxHeight > this.vWidth / this.vHeight
+      ? { width: (this.vWidth / this.vHeight) * pxHeight, height: pxHeight }
+      : { width: pxWidth, height: (this.vHeight / this.vWidth) * pxWidth };
+
+    // create svg element, set attributes, append to body
     let svg = document.createElementNS(namespace, "svg");
     svg.setAttribute("viewBox", `0 0 ${this.vWidth} ${this.vHeight}`);
     svg.setAttribute("width", `${dimensions.width}px`);
     svg.setAttribute("height", `${dimensions.height}px`);
-    svg.setAttribute("style", "background-color: white");
+    svg.setAttribute("style", `background-color: rgb(${this.backgroundColor[0]}, ${this.backgroundColor[1]}, ${this.backgroundColor[2]})`);
+    document.body.appendChild(svg);
+
+    // loop over all threads in the pattern
     for (let thread of this.threads) {
+
+      // create an svg group for each thread, append it to the svg
       let group = document.createElementNS(namespace, "g");
-      group.setAttribute(
-        "style",
-        `fill: none; stroke-width: 1; stroke: rgb(${thread.red}, ${thread.green}, ${thread.blue});`
-      );
+      group.setAttribute("style", `fill: none; stroke-width: 1; stroke: rgb(${thread.red}, ${thread.green}, ${thread.blue});`);
+      svg.appendChild(group);
+
+      // loop over all runs in the thread
       for (let run of thread.runs) {
-        let stitches = run.getStitches(dimensions.width / this.vWidth);
-        let d = `M ${Number(stitches[0].x.toPrecision(sigFigs))} ${Number(
-          stitches[0].y.toPrecision(sigFigs)
-        )}`;
-        for (let i = 1; i < stitches.length; i++)
-          d += ` L ${Number(stitches[i].x.toPrecision(sigFigs))} ${Number(
-            stitches[i].y.toPrecision(sigFigs)
-          )}`;
+
+        // request the stitches - 3.78 seems a bit arbitrary but ¯\_(ツ)_/¯
+        // https://stackoverflow.com/questions/35359334/svg-mm-and-px-co-ordinates-lengths-differ-for-defined-viewbox
+        let stitches = run.getStitches(3.78 * this.vWidth / dimensions.width);
+
+        // loop over all stitches, append to the "d" string
+        let d = "";
+        for (let i = 0; i < stitches.length; i++) {
+          let x = Number(stitches[i].x.toPrecision(sigFigs));
+          let y = Number(stitches[i].y.toPrecision(sigFigs));
+          if (i === 0) d += `M ${x} ${y}`;
+          else d += ` L ${x} ${y}`;
+        }
+
+        // create path, set attributes, append to group
         let path = document.createElementNS(namespace, "path");
         path.setAttribute("stroke-linejoin", "bevel");
+        path.setAttribute("vector-effect", "non-scaling-stroke");
         path.setAttribute("d", d);
         group.appendChild(path);
+
       }
-      svg.appendChild(group);
+
     }
-    document.body.appendChild(svg);
+
+    // return the svg in case the user wants to do anything extra with it
     return svg;
+
   }
-  getSvgString(
-    mmWidth,
-    mmHeight,
-    sigFigs = 5,
-    namespace = "http://www.w3.org/2000/svg"
-  ) {
-    let dimensions = this.adjustToOutputAspectRatio(mmWidth, mmHeight);
 
-    let bb = createVector(this.vWidth, this.vHeight);
-    for (let thread of this.threads) {
-      for (let run of thread.runs) {
-        let stitches = run.getStitches(this.vWidth / dimensions.width);
-        for (let stitch of stitches) {
-          let x = Number(stitch.x.toPrecision(sigFigs));
-          let y = Number(stitch.y.toPrecision(sigFigs));
-          if (x < bb.x) bb.x = x;
-          if (y < bb.y) bb.y = y;
-        }
-      }
-    }
+  getSvgString(mmWidth, mmHeight, sigFigs = 5, namespace = "http://www.w3.org/2000/svg") {
 
+    // calculate the aspect ratio adjustment
+    let dimensions = mmWidth / mmHeight > this.vWidth / this.vHeight
+      ? { width: (this.vWidth / this.vHeight) * mmHeight, height: mmHeight }
+      : { width: mmWidth, height: (this.vHeight / this.vWidth) * mmWidth };
+
+    // create svg element, set attributes
     let svg = document.createElementNS(namespace, "svg");
     svg.setAttribute("viewBox", `0 0 ${this.vWidth} ${this.vHeight}`);
     svg.setAttribute("width", `${dimensions.width}mm`);
     svg.setAttribute("height", `${dimensions.height}mm`);
     svg.setAttribute("style", "background-color: white");
+
+    // initialize variables to calculate the minimum x and y coordinates
+    let xMin = Infinity;
+    let yMin = Infinity;
+
+    // loop over all threads in the pattern
     for (let thread of this.threads) {
+
+      // create an svg group for each thread, append it to the svg
       let group = document.createElementNS(namespace, "g");
-      group.setAttribute(
-        "style",
-        `fill: none; stroke-width: 1; stroke: rgb(${thread.red}, ${thread.green}, ${thread.blue});`
-      );
+      group.setAttribute("style", `fill: none; stroke-width: 1; stroke: rgb(${thread.red}, ${thread.green}, ${thread.blue});`);
+      svg.appendChild(group);
+
+      // loop over all runs in the thread
       for (let run of thread.runs) {
+
+        // request the stitches
         let stitches = run.getStitches(this.vWidth / dimensions.width);
-        let d = `M ${Number(stitches[0].x.toPrecision(sigFigs)) - bb.x} ${
-          Number(stitches[0].y.toPrecision(sigFigs)) - bb.y
-        }`;
-        for (let i = 1; i < stitches.length; i++) {
-          d += ` L ${Number(stitches[i].x.toPrecision(sigFigs)) - bb.x} ${
-            Number(stitches[i].y.toPrecision(sigFigs)) - bb.y
-          }`;
+
+        // loop over all stitches, append to the "d" string
+        let d = "";
+        for (let i = 0; i < stitches.length; i++) {
+          let x = Number(stitches[i].x.toPrecision(sigFigs));
+          let y = Number(stitches[i].y.toPrecision(sigFigs));
+          if (xMin > x) xMin = x;
+          if (yMin > y) yMin = y;
+          if (i === 0) d += `M ${x} ${y}`;
+          else d += ` L ${x} ${y}`;
         }
+
+        // create path, set attributes, append to group
         let path = document.createElementNS(namespace, "path");
         path.setAttribute("stroke-linejoin", "bevel");
+        path.setAttribute("vector-effect", "non-scaling-stroke");
         path.setAttribute("d", d);
         group.appendChild(path);
+
       }
-      svg.appendChild(group);
+
     }
+
+    // set the transform attribute to justify the pattern into the top left corner
+    svg.setAttribute("transform", `translate(${-xMin} ${-yMin})`);
+
+    // create the serializer and return the serialized svg string
     let serializer = new XMLSerializer();
     return serializer.serializeToString(svg);
+
   }
+
 };
 
 Stitch.Thread = class {
@@ -156,7 +189,7 @@ Stitch.Utils.Vector = class {
     return Math.atan2(this.y, this.x);
   }
   magnitude() {
-    return sqrt(this.x * this.x + this.y * this.y);
+    return Math.sqrt(this.x * this.x + this.y * this.y);
   }
   normalized() {
     return this.divide(this.magnitude());
@@ -306,6 +339,7 @@ Stitch.Utils.getRoundedLine = function (points, radius, isClosed = false) {
     }
   }
   if (!isClosed) result.push(points[points.length - 1]);
+  else result.push(result[0]);
   return result;
 };
 
@@ -459,68 +493,46 @@ class StitchRunTemaplate {
 }
 
 let StitchRuns = {
+
   Run: class extends StitchRunTemaplate {
-    constructor(aDensity) {
+    constructor(density) {
       super();
-      this.aDensity = aDensity;
+      this.density = density;
       this.points = [];
     }
     addPoint(x, y) {
       this.points.push(new Stitch.Utils.Vector(x, y));
     }
     getStitches(pixelsPerUnit) {
-      return Stitch.Utils.resampleLineBySpacing(
-        this.points,
-        pixelsPerUnit * this.aDensity
-      );
+      return Stitch.Utils.resampleLineBySpacing(this.points, pixelsPerUnit * this.density);
     }
   },
 
   Satin: class extends StitchRunTemaplate {
-    constructor(vWidth, aDensity) {
+    constructor(width, density) {
       super();
-      this.vWidth = vWidth;
-      this.aDensity = aDensity;
+      this.width = width;
+      this.density = density;
       this.points = [];
     }
     addPoint(x, y) {
       this.points.push(new Stitch.Utils.Vector(x, y));
     }
     getStitches(pixelsPerUnit) {
-      let resampled = Stitch.Utils.resampleLineBySpacing(
-        this.points,
-        pixelsPerUnit * this.aDensity
-      );
+      let resampled = Stitch.Utils.resampleLineBySpacing(this.points, pixelsPerUnit * this.density);
       let stitches = [];
       for (let i = 0; i < resampled.length; i++) {
         let current = resampled[i];
-        let normal = { x: 0, y: 0 };
+        let normal = new Stitch.Utils.Vector(0, 0);
         if (i > 0) {
-          let dv = Stitch.Utils.normalizeVector({
-            x: current.x - resampled[i - 1].x,
-            y: current.y - resampled[i - 1].y,
-          });
-          normal.x += dv.x;
-          normal.y += dv.y;
+          normal = normal.add(current.subtract(resampled[i - 1]).normalized());
         }
         if (i < resampled.length - 1) {
-          let dv = Stitch.Utils.normalizeVector({
-            x: resampled[i + 1].x - current.x,
-            y: resampled[i + 1].y - current.y,
-          });
-          normal.x += dv.x;
-          normal.y += dv.y;
+          normal = normal.add(resampled[i + 1].subtract(current).normalized());
         }
-        normal = Stitch.Utils.normalizeVector(normal);
-        normal = Stitch.Utils.rotateVector(normal, 0.5 * Math.PI);
-        stitches.push({
-          x: current.x + this.vWidth * normal.x,
-          y: current.y + this.vWidth * normal.y,
-        });
-        stitches.push({
-          x: current.x - this.vWidth * normal.x,
-          y: current.y - this.vWidth * normal.y,
-        });
+        normal = normal.normalized().rotate(0.5 * Math.PI);
+        stitches.push(current.add(normal.multiply(0.5 * this.width)));
+        stitches.push(current.subtract(normal.multiply(0.5 * this.width)));
       }
       return stitches;
     }
