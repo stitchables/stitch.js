@@ -82,14 +82,13 @@ Stitch.Pattern = class {
 
     // create svg element, set attributes
     let svg = document.createElementNS(namespace, "svg");
-    svg.setAttribute("viewBox", `0 0 ${this.vWidth} ${this.vHeight}`);
-    svg.setAttribute("width", `${dimensions.width}mm`);
-    svg.setAttribute("height", `${dimensions.height}mm`);
-    svg.setAttribute("style", "background-color: white");
 
     // initialize variables to calculate the minimum x and y coordinates
     let xMin = Infinity;
     let yMin = Infinity;
+    let xMax = -Infinity;
+    let yMax = -Infinity;
+    let groups = [];
 
     // loop over all threads in the pattern
     for (let thread of this.threads) {
@@ -111,24 +110,31 @@ Stitch.Pattern = class {
           let x = Number(stitches[i].x.toPrecision(sigFigs));
           let y = Number(stitches[i].y.toPrecision(sigFigs));
           if (xMin > x) xMin = x;
+          else if (xMax < x) xMax = x;
           if (yMin > y) yMin = y;
+          else if (yMax < y) yMax = y;
           if (i === 0) d += `M ${x} ${y}`;
           else d += ` L ${x} ${y}`;
         }
 
         // create path, set attributes, append to group
         let path = document.createElementNS(namespace, "path");
-        path.setAttribute("stroke-linejoin", "bevel");
-        path.setAttribute("vector-effect", "non-scaling-stroke");
         path.setAttribute("d", d);
         group.appendChild(path);
 
+        // keep track of groups to justify after loop
+        groups.push(group);
       }
 
     }
 
-    // set the transform attribute to justify the pattern into the top left corner
-    svg.setAttribute("transform", `translate(${-xMin} ${-yMin})`);
+    // justify the pattern into the top left corner
+    svg.setAttribute("viewBox", `0 0 ${xMax - xMin} ${yMax - yMin}`);
+    svg.setAttribute("width", `${(xMax - xMin) / this.vWidth * dimensions.width}mm`);
+    svg.setAttribute("height", `${(yMax - yMin) / this.vHeight * dimensions.height}mm`);
+    for (let group of groups) {
+      group.setAttribute("transform", `translate(${-xMin} ${-yMin})`);
+    }
 
     // create the serializer and return the serialized svg string
     let serializer = new XMLSerializer();
