@@ -17,6 +17,7 @@
 			}
 			let tokenData = genTokenData(0);
 			// tokenData = {"tokenId":"8000004","hash":"0xbb550f140aa5c83fb1684048317140ec3aff688383a7a89258072bfce24e075e"}
+			tokenData = {hash: '0x6df1eda2393bb871f1a9ce51bbf2d6bef65136373b0cd2af813c4766a7bce06c', tokenId: '556'}
 			console.log(tokenData);
 
 			// set up the rng
@@ -182,7 +183,7 @@
 				let thread = pattern.addThread(0, 0, 0);
 				if (features.stitchType === 'satin') {
 					for (let i = 0; i < lines.length; i++) {
-						let customRun = new CustomRun(0.5, 1, 2.0);
+						let customRun = new CustomRun(0.5, 1, 0.5);
 						for (let j = 0; j < lines[i].length; j++) {
 							customRun.addPath(lines[i][j]);
 						}
@@ -214,6 +215,9 @@
 					svg.style.position = "absolute";
 					svg.style.inset = 0;
 				}, 100));
+
+				// print the string out to the console for testing
+				console.log(generateEmbroiderySVG(Stitch.Utils.inchesToMillimeters(5), Stitch.Utils.inchesToMillimeters(5)));
 
 			}
 
@@ -261,7 +265,7 @@
 						let run = [];
 						for (let j = i === 0 ? 0 : 1; j < resampled.length; j++) {
 							let current = resampled[j];
-							if (current.w * pixelsPerUnit < this.satinCutoff) {
+							if (current.w < this.satinCutoff * pixelsPerUnit) {
 								run.push(current.v);
 							} else if (run.length > 0) {
 								let resampledRun = Stitch.Utils.resampleLineBySpacing(run, pixelsPerUnit * this.runDensity);

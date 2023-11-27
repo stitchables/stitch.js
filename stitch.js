@@ -119,6 +119,8 @@ Stitch.Pattern = class {
 
         // create path, set attributes, append to group
         let path = document.createElementNS(namespace, "path");
+        path.setAttribute("stroke-linejoin", "bevel");
+        path.setAttribute("vector-effect", "non-scaling-stroke");
         path.setAttribute("d", d);
         group.appendChild(path);
 
