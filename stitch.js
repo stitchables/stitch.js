@@ -18,6 +18,60 @@ Stitch.Pattern = class {
     return this.threads.slice(-1)[0];
   }
 
+  getStitches(width, height, pixels = false, justify = true) {
+
+    // calculate the aspect ratio adjustment
+    let dimensions = width / height > this.vWidth / this.vHeight
+      ? { width: (this.vWidth / this.vHeight) * height, height: height }
+      : { width: width, height: (this.vHeight / this.vWidth) * width };
+
+    // prepare the bounding box for justify calculations
+    let boundingBox = { xMin: Infinity, yMin: Infinity, xMax: -Infinity, yMax: -Infinity };
+
+    // get the stitches
+    let stitchPattern = {
+      width: dimensions.width,
+      height: dimensions.height,
+      pixelsPerUnit: (pixels ? 3.78 : 1) * this.vWidth / dimensions.width,
+      stitchCount: 0,
+      threads: []
+    };
+    for (let thread of this.threads) {
+      let stitchThread = { thread: thread, runs: [] };
+      for (let run of thread.runs) {
+        let stitchRun = [];
+        for (let stitch of run.getStitches(stitchPattern.pixelsPerUnit)) {
+          stitchRun.push(new Stitch.Utils.Vector(stitch.x, stitch.y));
+          stitchPattern.stitchCount++;
+          if (justify) {
+            if (stitch.x < boundingBox.xMin) boundingBox.xMin = stitch.x;
+            if (stitch.x > boundingBox.xMax) boundingBox.xMax = stitch.x;
+            if (stitch.y < boundingBox.yMin) boundingBox.yMin = stitch.y;
+            if (stitch.y > boundingBox.yMax) boundingBox.yMax = stitch.y;
+          }
+        }
+        stitchThread.runs.push(stitchRun);
+      }
+      stitchPattern.threads.push(stitchThread);
+    }
+
+    // move the pattern into the top left corner
+    if (justify) {
+      stitchPattern.width = (boundingBox.xMax - boundingBox.xMin);
+      stitchPattern.height = (boundingBox.yMax - boundingBox.yMin);
+      for (let i = 0; i < stitchPattern.threads.length; i++) {
+        for (let j = 0; j < stitchPattern.threads[i].runs.length; j++) {
+          for (let k = 0; k < stitchPattern.threads[i].runs[j].length; k++) {
+            stitchPattern.threads[i].runs[j][k] = stitchPattern.threads[i].runs[j][k].subtract(new Stitch.Utils.Vector(boundingBox.xMin, boundingBox.yMin));
+          }
+        }
+      }
+    }
+
+    return stitchPattern;
+
+  }
+
   drawSvg(pxWidth, pxHeight, sigFigs = 5, namespace = "http://www.w3.org/2000/svg") {
 
     // calculate the aspect ratio adjustment
@@ -503,6 +557,196 @@ Stitch.Utils.debounce = function (func, time = 0) {
   };
 }
 
+// Future: maybe use the File System API? https://developer.mozilla.org/en-US/docs/Web/API/File_System_API
+// Stitch.Writer = class {
+//   // options: filename, extension, pattern, widthMM, heightMM
+//   constructor(element, event, options) {
+//     this.options = options;
+//     element.addEventListener(event, async () => { await this.write(); });
+//   }
+//   async write() {
+//     let handle = await window.showSaveFilePicker({ suggestedName: `${this.options.filename}.${this.options.extension}` });
+//     const writable = await handle.createWritable();
+//     let data = new Uint8Array([0, 0, 0b11000011]);
+//     await writable.write(data);
+//     await writable.close();
+//   }
+// }
+
+Stitch.Writer = {
+
+  write: function (pattern, filename, widthMM, heightMM) {
+
+    // calculate the stitch pattern for the requested dimensions
+    let stitchPattern = pattern.getStitches(widthMM, heightMM, false, true);
+
+    // apply transform the stitches
+    for (let i = 0; i < stitchPattern.threads.length; i++) {
+      for (let j = 0; j < stitchPattern.threads[i].runs.length; j++) {
+        for (let k = 0; k < stitchPattern.threads[i].runs[j].length; k++) {
+          stitchPattern.threads[i].runs[j][k] = stitchPattern.threads[i].runs[j][k].subtract(new Stitch.Utils.Vector(0.5 * stitchPattern.width, 0.5 * stitchPattern.height));
+          stitchPattern.threads[i].runs[j][k] = stitchPattern.threads[i].runs[j][k].divide(stitchPattern.pixelsPerUnit);
+        }
+      }
+    }
+    stitchPattern.width /= stitchPattern.pixelsPerUnit;
+    stitchPattern.height /= stitchPattern.pixelsPerUnit;
+
+    // run the appropriate writer for the given extension
+    switch(filename.toLowerCase().split(".")[1]) {
+      case 'dst':
+        let writer = new Stitch.Writer.DSTWriter();
+        writer.write(stitchPattern, filename);
+        break;
+      default:
+        console.log(`Unsupported file extension: ${filename}`);
+    }
+
+  },
+
+  DSTWriter: class {
+
+    bit(b) { return 1 << b; }
+
+    encodeRecord(x, y, flag) {
+      y = -y;
+      let b0 = 0;
+      let b1 = 0;
+      let b2 = 0;
+      switch (flag) {
+        case 'JUMP':
+        case 'SEQUIN_EJECT':
+          b2 += this.bit(7);
+          // fallthrough
+        case 'STITCH':
+          b2 += this.bit(0);
+          b2 += this.bit(1);
+          if (x > 40) { b2 += this.bit(2); x -= 81; }
+          if (x < -40) { b2 += this.bit(3); x += 81; }
+          if (x > 13) { b1 += this.bit(2); x -= 27; }
+          if (x < -13) { b1 += this.bit(3); x += 27; }
+          if (x > 4) { b0 += this.bit(2); x -= 9; }
+          if (x < -4) { b0 += this.bit(3); x += 9; }
+          if (x > 1) { b1 += this.bit(0); x -= 3; }
+          if (x < -1) { b1 += this.bit(1); x += 3; }
+          if (x > 0) { b0 += this.bit(0); x -= 1; }
+          if (x < 0) { b0 += this.bit(1); x += 1; }
+          if (x != 0) console.log("[Stitch Writer] Error: Write exceeded possible distance.");
+          if (y > 40) { b2 += this.bit(5); y -= 81; }
+          if (y < -40) { b2 += this.bit(4); y += 81; }
+          if (y > 13) { b1 += this.bit(5); y -= 27; }
+          if (y < -13) { b1 += this.bit(4); y += 27; }
+          if (y > 4) { b0 += this.bit(5); y -= 9; }
+          if (y < -4) { b0 += this.bit(4); y += 9; }
+          if (y > 1) { b1 += this.bit(7); y -= 3; }
+          if (y < -1) { b1 += this.bit(6); y += 3; }
+          if (y > 0) { b0 += this.bit(7); y -= 1; }
+          if (y < 0) { b0 += this.bit(6); y += 1; }
+          if (y != 0) console.log("[Stitch Writer] Error: Write exceeded possible distance.");
+          break;
+        case 'COLOR_CHANGE':
+          b2 = 0b11000011;
+          break;
+        case 'STOP':
+          b2 = 0b11110011;
+          break;
+        case 'END':
+          b2 = 0b11110011;
+          break;
+        case 'SEQUIN_MODE':
+          b2 = 0b01000011;
+          break;
+        default:
+          console.log(`Unexpected flag: ${flag}`);
+      }
+      return new Uint8Array([b0, b1, b2]);
+    }
+
+    // https://edutechwiki.unige.ch/en/Embroidery_format_DST
+    // http://www.achatina.de/sewing/main/DST.HTM
+    write(stitchPattern, filename) {
+
+      // helper functions for string formatting
+      function padLeft(string, length, char = " ") { return string.substring(0, length).padStart(length, char); }
+      function padRight(string, length, char = " ") { return string.substring(0, length).padEnd(length, char); }
+
+      // array to hold the data to be written
+      let data = [];
+
+      // header
+      data.push(`LA:${padRight(filename.split(".")[0], 16, " ")}\r`);
+      data.push(`ST:${padLeft(stitchPattern.stitchCount.toString(), 7, " ")}\r`);
+      /* number of color changes, not number of colors! */
+      data.push(`CO:${padLeft((stitchPattern.threads.length - 1).toString(), 3, " ")}\r`);
+      data.push(`+X:${padLeft(Math.ceil(0.1 * 0.5 * stitchPattern.width).toString(), 5, " ")}\r`);
+      data.push(`-X:${padLeft(Math.ceil(0.1 * 0.5 * stitchPattern.width).toString(), 5, " ")}\r`);
+      data.push(`+Y:${padLeft(Math.ceil(0.1 * 0.5 * stitchPattern.height).toString(), 5, " ")}\r`);
+      data.push(`-Y:${padLeft(Math.ceil(0.1 * 0.5 * stitchPattern.height).toString(), 5, " ")}\r`);
+      // let firstSticth = stitchPattern.threads[0].runs[0][0];
+      // let lastThread = stitchPattern.threads[stitchPattern.threads.length - 1];
+      // let lastRun = lastThread.runs[lastThread.runs.length - 1];
+      // let lastStitch = lastRun[lastRun.length - 1];
+      // let ax = firstSticth.x - lastStitch.x;
+      // let ay = firstSticth.y - lastStitch.y;
+      data.push('AX:+    0\r');
+      data.push('AY:+    0\r');
+      data.push('MX:+    0\r');
+      data.push('MY:+    0\r');
+      data.push('PD:******\r');
+      data.push(new Uint8Array([0x1a]));
+      data.push(" ".repeat(387));
+
+      // body
+      let xx = 0;
+      let yy = 0;
+      for (let i = 0; i < stitchPattern.threads.length; i++) {
+        if (i > 0) data.push(this.encodeRecord(0, 0, 'COLOR_CHANGE'));
+        for (let run of stitchPattern.threads[i].runs) {
+          for (let stitch of run) {
+            let x = 10 * stitch.x;
+            let y = 10 * stitch.y;
+            let dx = Math.round(x - xx);
+            let dy = Math.round(y - yy);
+            xx += dx;
+            yy += dy;
+            if (Math.abs(dx) >= 121 || Math.abs(dy) >= 121) {
+              let steps = Math.max(Math.abs(0.01 * dx), Math.abs(0.01 * dy)) + 1;
+              let inc = 1 / steps;
+              let accx = 0;
+              let accy = 0;
+              let ddx = Math.round(dx * inc);
+              let ddy = Math.round(dy * inc);
+              for (let j = 0; j < steps - 1; j++) {
+                data.push(this.encodeRecord(ddx, ddy, 'JUMP'));
+                accx += ddx;
+                accy += ddy;
+              }
+              dx -= accx;
+              dy -= accy;
+            }
+            data.push(this.encodeRecord(dx, dy, 'STITCH'));
+          }
+        }
+      }
+
+      // end of file
+      data.push(this.encodeRecord(0, 0, 'END'));
+
+      // save the file
+      let blob = new Blob(data, {type: "application/octet-stream"});
+      let url = window.URL.createObjectURL(blob);
+      let a = document.createElement("a");
+      document.body.appendChild(a);
+      a.style = "display: none";
+      a.href = url;
+      a.download = filename;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    }
+  }
+}
+
 class StitchRunTemaplate {
   constructor() {}
   getStitches(pixelsPerUnit) {}
@@ -554,3 +798,5 @@ let StitchRuns = {
     }
   },
 };
+
+
