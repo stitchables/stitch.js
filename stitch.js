@@ -767,7 +767,7 @@ Stitch.IO = {
           }
         }
       }
-      
+
     },
 
     PES: class {
@@ -971,6 +971,122 @@ let StitchRuns = {
       return stitches;
     }
   },
+
+  // only works for convex shapes without holes...
+  SimpleFill: class extends StitchRunTemaplate {
+    constructor(stitchLengthMM, densityMM, angle) {
+      super();
+      this.stitchLengthMM = stitchLengthMM;
+      this.densityMM = densityMM;
+      this.angle = angle;
+      this.points = [];
+    }
+    addPoint(x, y) {
+      this.points.push(new Stitch.Utils.Vector(x, y));
+    }
+    getStitches(pixelsPerUnit) {
+      let stitches = [];
+      let hatchLines = this.hatch(pixelsPerUnit);
+      for (let i = 0; i < hatchLines.length; i++) {
+
+        let totalDistance = hatchLines[i].checkStart.distance(hatchLines[i].checkEnd);
+        let spacing = this.stitchLengthMM * pixelsPerUnit;
+
+        // probably a better/faster way to do this but I am tired for now ¯\_(ツ)_/¯
+        let run = [hatchLines[i].checkStart];
+        for (let d = spacing; d < totalDistance; d += spacing) {
+          run.push(hatchLines[i].checkEnd.lerp(hatchLines[i].checkStart, 1 - d / totalDistance));
+        }
+        run.push(hatchLines[i].checkEnd);
+
+        let offsetRun = [hatchLines[i].checkStart];
+        for (let d = 0.5 * spacing; d < totalDistance; d += spacing) {
+          offsetRun.push(hatchLines[i].checkEnd.lerp(hatchLines[i].checkStart, 1 - d / totalDistance));
+        }
+        offsetRun.push(hatchLines[i].checkEnd);
+        offsetRun = offsetRun.reverse();
+
+        if (i % 2 === 0) {
+          stitches.push(hatchLines[i].intersectionStart);
+          let dMin = hatchLines[i].checkStart.distance(hatchLines[i].intersectionStart);
+          let dMax = hatchLines[i].checkStart.distance(hatchLines[i].intersectionEnd);
+          for (let p of run) {
+            let d = hatchLines[i].checkStart.distance(p);
+            if (d > dMin && d < dMax) stitches.push(p);
+          }
+          stitches.push(hatchLines[i].intersectionEnd);
+        } else {
+          stitches.push(hatchLines[i].intersectionEnd);
+          let dMin = hatchLines[i].checkEnd.distance(hatchLines[i].intersectionEnd);
+          let dMax = hatchLines[i].checkEnd.distance(hatchLines[i].intersectionStart);
+          for (let p of offsetRun) {
+            let d = hatchLines[i].checkEnd.distance(p);
+            if (d > dMin && d < dMax) stitches.push(p);
+          }
+          stitches.push(hatchLines[i].intersectionStart);
+        }
+      }
+      return stitches;
+    }
+    hatch(pixelsPerUnit) {
+      let hatchLines = [];
+      let bb = {xMin: Infinity, xMax: -Infinity, yMin: Infinity, yMax: -Infinity};
+      for (let p of this.points) {
+        if (p.x < bb.xMin) bb.xMin = p.x;
+        if (p.x > bb.xMax) bb.xMax = p.x;
+        if (p.y < bb.yMin) bb.yMin = p.y;
+        if (p.y > bb.yMax) bb.yMax = p.y;
+      }
+      let bc = {
+        x: 0.5 * (bb.xMax + bb.xMin),
+        y: 0.5 * (bb.yMax + bb.yMin),
+        r: Math.sqrt(0.25 * (bb.xMax - bb.xMin) * (bb.xMax - bb.xMin) + 0.25 * (bb.yMax - bb.yMin) * (bb.yMax - bb.yMin))
+      };
+      let line = {
+        start: new Stitch.Utils.Vector(bc.x - bc.r * Math.cos(this.angle), bc.y - bc.r * Math.sin(this.angle)),
+        end: new Stitch.Utils.Vector(bc.x + bc.r * Math.cos(this.angle), bc.y + bc.r * Math.sin(this.angle))
+      };
+      let n = Math.floor(2 * bc.r / pixelsPerUnit / this.densityMM);
+      for (let i = 0; i < n; i++) {
+        let t = i / (n - 1);
+        let x = line.start.x * (1 - t) + line.end.x * t;
+        let y = line.start.y * (1 - t) + line.end.y * t;
+        let px = x + bc.r * Math.cos(this.angle - 0.5 * Math.PI);
+        let py = y + bc.r * Math.sin(this.angle - 0.5 * Math.PI);
+        let qx = x + bc.r * Math.cos(this.angle + 0.5 * Math.PI);
+        let qy = y + bc.r * Math.sin(this.angle + 0.5 * Math.PI);
+        let ps = this.segmentIntersectPolygon(new Stitch.Utils.Vector(px, py), new Stitch.Utils.Vector(qx, qy));
+        if (ps.length === 2) {
+          hatchLines.push({
+            intersectionStart: ps[0],
+            intersectionEnd: ps[1],
+            checkStart: new Stitch.Utils.Vector(px, py),
+            checkEnd: new Stitch.Utils.Vector(qx, qy)
+          });
+        }
+      }
+      return hatchLines;
+    }
+    segmentIntersectPolygon(p1, p2) {
+      let intersections = [];
+      for (let i = 1; i < this.points.length + 1; i++) {
+        let intersection = this.lineSegmentIntersection(p1, p2, this.points[i - 1], this.points[i % this.points.length]);
+        if (intersection) intersections.push({intersection: intersection, distance: p1.distance(intersection)});
+      }
+      intersections.sort((a, b) => a.distance < b.distance ? -1 : 1);
+      return intersections.map((x) => x.intersection);
+    }
+    lineSegmentIntersection(p1, p2, q1, q2) {
+      let s1 = p2.subtract(p1);
+      let s2 = q2.subtract(q1);
+      let d = -s2.x * s1.y + s1.x * s2.y;
+      let s = (-s1.y * (p1.x - q1.x) + s1.x * (p1.y - q1.y)) / d;
+      let t = (s2.x * (p1.y - q1.y) - s2.y * (p1.x - q1.x)) / d;
+      if (s >= 0 && s <= 1 && t >= 0 && t <= 1) return new Stitch.Utils.Vector(p1.x + (t * s1.x), p1.y + (t * s1.y));
+      else return null;
+    }
+  }
+
 };
 
 

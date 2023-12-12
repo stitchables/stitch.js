@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+
+	<head>
+		<script src="../stitch.js"></script>
+		<style>
+			svg {
+				margin: auto;
+				position: absolute;
+				inset: 0;
+			}
+		</style>
+	</head>
+
+	<body>
+		<script>
+
+			// create a new pattern
+			let pattern = new Stitch.Pattern(500, 500);
+
+			// add the thread
+			let thread = pattern.addThread(0, 0, 0);
+
+			// create the shape outline
+			let shape = [
+				new Stitch.Utils.Vector(0.1 * pattern.vWidth, 0.1 * pattern.vHeight),
+				new Stitch.Utils.Vector(0.9 * pattern.vWidth, 0.1 * pattern.vHeight),
+				new Stitch.Utils.Vector(0.9 * pattern.vWidth, 0.9 * pattern.vHeight),
+				new Stitch.Utils.Vector(0.1 * pattern.vWidth, 0.9 * pattern.vHeight),
+			];
+			let roundedShape = Stitch.Utils.getRoundedLine(shape, 50, true);
+
+			// create the stitch run and add the points of the shape
+			let simpleFill = new StitchRuns.SimpleFill(3, 0.25, 0.25 * Math.PI);
+			for (let point of roundedShape) simpleFill.addPoint(point.x, point.y);
+			thread.addRun(simpleFill);
+
+			// draw the pattern
+			let svg = pattern.drawSvg(window.innerWidth, window.innerHeight);
+
+			// redraw pattern as the window is resized
+			window.addEventListener("resize", Stitch.Utils.debounce(() => {
+				document.body.removeChild(svg);
+				svg = pattern.drawSvg(window.innerWidth, window.innerHeight);
+			}));
+
+			// create the function for stitchables output
+			function generateEmbroiderySVG(widthMM, heightMM) {
+				return pattern.getSvgString(widthMM, heightMM);
+			}
+
+			// print the string out to the console for testing
+			console.log(generateEmbroiderySVG(Stitch.Utils.inchesToMillimeters(2), Stitch.Utils.inchesToMillimeters(2)));
+
+			// download the embroidery file
+			// Stitch.IO.write(pattern, "simpleFill.dst", Stitch.Utils.inchesToMillimeters(5), Stitch.Utils.inchesToMillimeters(5));
+			Stitch.IO.write(pattern, "simpleFill.pes", Stitch.Utils.inchesToMillimeters(5), Stitch.Utils.inchesToMillimeters(5));
+
+		</script>
+	</body>
+
+</html>
