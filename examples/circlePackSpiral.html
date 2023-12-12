@@ -17,7 +17,7 @@
 			}
 			let tokenData = genTokenData(0);
 			// tokenData = {"tokenId":"8000004","hash":"0xbb550f140aa5c83fb1684048317140ec3aff688383a7a89258072bfce24e075e"}
-			tokenData = {hash: '0x6df1eda2393bb871f1a9ce51bbf2d6bef65136373b0cd2af813c4766a7bce06c', tokenId: '556'}
+			// tokenData = {hash: '0x6df1eda2393bb871f1a9ce51bbf2d6bef65136373b0cd2af813c4766a7bce06c', tokenId: '556'}
 			console.log(tokenData);
 
 			// set up the rng
@@ -218,6 +218,10 @@
 
 				// print the string out to the console for testing
 				console.log(generateEmbroiderySVG(Stitch.Utils.inchesToMillimeters(5), Stitch.Utils.inchesToMillimeters(5)));
+
+				// download the embroidery file
+				// Stitch.IO.write(pattern, "circlePackSpiral.dst", Stitch.Utils.inchesToMillimeters(10), Stitch.Utils.inchesToMillimeters(10));
+				Stitch.IO.write(pattern, "circlePackSpiral.pes", Stitch.Utils.inchesToMillimeters(10), Stitch.Utils.inchesToMillimeters(10));
 
 			}
 

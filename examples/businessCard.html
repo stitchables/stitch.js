@@ -140,6 +140,10 @@
 			// print the string out to the console for testing
 			console.log(generateEmbroiderySVG(Stitch.Utils.inchesToMillimeters(2), Stitch.Utils.inchesToMillimeters(2)));
 
+			// download the embroidery file
+			Stitch.IO.write(pattern, "businessCard.dst", Stitch.Utils.inchesToMillimeters(3.5), Stitch.Utils.inchesToMillimeters(2));
+			Stitch.IO.write(pattern, "businessCard.pes", Stitch.Utils.inchesToMillimeters(3.5), Stitch.Utils.inchesToMillimeters(2));
+
 		</script>
 	</body>
 

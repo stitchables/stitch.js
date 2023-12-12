@@ -32,10 +32,11 @@ Stitch.Pattern = class {
     let stitchPattern = {
       width: dimensions.width,
       height: dimensions.height,
-      pixelsPerUnit: (pixels ? 3.78 : 1) * this.vWidth / dimensions.width,
+      pixelsPerUnit: (pixels ? 3.78 : 1) * this.vWidth / width,
       stitchCount: 0,
       threads: []
     };
+
     for (let thread of this.threads) {
       let stitchThread = { thread: thread, runs: [] };
       for (let run of thread.runs) {
@@ -573,14 +574,30 @@ Stitch.Utils.debounce = function (func, time = 0) {
 //   }
 // }
 
-Stitch.Writer = {
+Stitch.IO = {
+
+  read: function(data, extension) {
+    // let reader;
+    // switch(extension) {
+    //   case 'dst':
+    //     reader = new Stitch.IO.Readers.DST();
+    //     return reader.read(data);
+    //     break;
+    //   case 'pes':
+    //     reader = new Stitch.IO..Readers.PES();
+    //     return reader.read(data);
+    //     break;
+    //   default:
+    //     alert(`[Stitch.IO.read] Unsupported file extension: ${filename}`);
+    // }
+  },
 
   write: function (pattern, filename, widthMM, heightMM) {
 
     // calculate the stitch pattern for the requested dimensions
     let stitchPattern = pattern.getStitches(widthMM, heightMM, false, true);
 
-    // apply transform the stitches
+    // center the pattern and convert units to millimeters
     for (let i = 0; i < stitchPattern.threads.length; i++) {
       for (let j = 0; j < stitchPattern.threads[i].runs.length; j++) {
         for (let k = 0; k < stitchPattern.threads[i].runs[j].length; k++) {
@@ -593,146 +610,33 @@ Stitch.Writer = {
     stitchPattern.height /= stitchPattern.pixelsPerUnit;
 
     // run the appropriate writer for the given extension
+    let writer;
     switch(filename.toLowerCase().split(".")[1]) {
       case 'dst':
-        let writer = new Stitch.Writer.DSTWriter();
+        writer = new Stitch.IO.Writers.DST();
+        writer.write(stitchPattern, filename);
+        break;
+      case 'pes':
+        writer = new Stitch.IO.Writers.PES();
         writer.write(stitchPattern, filename);
         break;
       default:
-        console.log(`Unsupported file extension: ${filename}`);
+        alert(`[Stitch.IO.write] Unsupported file extension: ${filename}`);
     }
 
   },
 
-  DSTWriter: class {
-
-    bit(b) { return 1 << b; }
-
-    encodeRecord(x, y, flag) {
-      y = -y;
-      let b0 = 0;
-      let b1 = 0;
-      let b2 = 0;
-      switch (flag) {
-        case 'JUMP':
-        case 'SEQUIN_EJECT':
-          b2 += this.bit(7);
-          // fallthrough
-        case 'STITCH':
-          b2 += this.bit(0);
-          b2 += this.bit(1);
-          if (x > 40) { b2 += this.bit(2); x -= 81; }
-          if (x < -40) { b2 += this.bit(3); x += 81; }
-          if (x > 13) { b1 += this.bit(2); x -= 27; }
-          if (x < -13) { b1 += this.bit(3); x += 27; }
-          if (x > 4) { b0 += this.bit(2); x -= 9; }
-          if (x < -4) { b0 += this.bit(3); x += 9; }
-          if (x > 1) { b1 += this.bit(0); x -= 3; }
-          if (x < -1) { b1 += this.bit(1); x += 3; }
-          if (x > 0) { b0 += this.bit(0); x -= 1; }
-          if (x < 0) { b0 += this.bit(1); x += 1; }
-          if (x != 0) console.log("[Stitch Writer] Error: Write exceeded possible distance.");
-          if (y > 40) { b2 += this.bit(5); y -= 81; }
-          if (y < -40) { b2 += this.bit(4); y += 81; }
-          if (y > 13) { b1 += this.bit(5); y -= 27; }
-          if (y < -13) { b1 += this.bit(4); y += 27; }
-          if (y > 4) { b0 += this.bit(5); y -= 9; }
-          if (y < -4) { b0 += this.bit(4); y += 9; }
-          if (y > 1) { b1 += this.bit(7); y -= 3; }
-          if (y < -1) { b1 += this.bit(6); y += 3; }
-          if (y > 0) { b0 += this.bit(7); y -= 1; }
-          if (y < 0) { b0 += this.bit(6); y += 1; }
-          if (y != 0) console.log("[Stitch Writer] Error: Write exceeded possible distance.");
-          break;
-        case 'COLOR_CHANGE':
-          b2 = 0b11000011;
-          break;
-        case 'STOP':
-          b2 = 0b11110011;
-          break;
-        case 'END':
-          b2 = 0b11110011;
-          break;
-        case 'SEQUIN_MODE':
-          b2 = 0b01000011;
-          break;
-        default:
-          console.log(`Unexpected flag: ${flag}`);
-      }
-      return new Uint8Array([b0, b1, b2]);
-    }
-
-    // https://edutechwiki.unige.ch/en/Embroidery_format_DST
-    // http://www.achatina.de/sewing/main/DST.HTM
-    write(stitchPattern, filename) {
-
-      // helper functions for string formatting
-      function padLeft(string, length, char = " ") { return string.substring(0, length).padStart(length, char); }
-      function padRight(string, length, char = " ") { return string.substring(0, length).padEnd(length, char); }
-
-      // array to hold the data to be written
-      let data = [];
-
-      // header
-      data.push(`LA:${padRight(filename.split(".")[0], 16, " ")}\r`);
-      data.push(`ST:${padLeft(stitchPattern.stitchCount.toString(), 7, " ")}\r`);
-      /* number of color changes, not number of colors! */
-      data.push(`CO:${padLeft((stitchPattern.threads.length - 1).toString(), 3, " ")}\r`);
-      data.push(`+X:${padLeft(Math.ceil(0.1 * 0.5 * stitchPattern.width).toString(), 5, " ")}\r`);
-      data.push(`-X:${padLeft(Math.ceil(0.1 * 0.5 * stitchPattern.width).toString(), 5, " ")}\r`);
-      data.push(`+Y:${padLeft(Math.ceil(0.1 * 0.5 * stitchPattern.height).toString(), 5, " ")}\r`);
-      data.push(`-Y:${padLeft(Math.ceil(0.1 * 0.5 * stitchPattern.height).toString(), 5, " ")}\r`);
-      // let firstSticth = stitchPattern.threads[0].runs[0][0];
-      // let lastThread = stitchPattern.threads[stitchPattern.threads.length - 1];
-      // let lastRun = lastThread.runs[lastThread.runs.length - 1];
-      // let lastStitch = lastRun[lastRun.length - 1];
-      // let ax = firstSticth.x - lastStitch.x;
-      // let ay = firstSticth.y - lastStitch.y;
-      data.push('AX:+    0\r');
-      data.push('AY:+    0\r');
-      data.push('MX:+    0\r');
-      data.push('MY:+    0\r');
-      data.push('PD:******\r');
-      data.push(new Uint8Array([0x1a]));
-      data.push(" ".repeat(387));
-
-      // body
-      let xx = 0;
-      let yy = 0;
-      for (let i = 0; i < stitchPattern.threads.length; i++) {
-        if (i > 0) data.push(this.encodeRecord(0, 0, 'COLOR_CHANGE'));
-        for (let run of stitchPattern.threads[i].runs) {
-          for (let stitch of run) {
-            let x = 10 * stitch.x;
-            let y = 10 * stitch.y;
-            let dx = Math.round(x - xx);
-            let dy = Math.round(y - yy);
-            xx += dx;
-            yy += dy;
-            if (Math.abs(dx) >= 121 || Math.abs(dy) >= 121) {
-              let steps = Math.max(Math.abs(0.01 * dx), Math.abs(0.01 * dy)) + 1;
-              let inc = 1 / steps;
-              let accx = 0;
-              let accy = 0;
-              let ddx = Math.round(dx * inc);
-              let ddy = Math.round(dy * inc);
-              for (let j = 0; j < steps - 1; j++) {
-                data.push(this.encodeRecord(ddx, ddy, 'JUMP'));
-                accx += ddx;
-                accy += ddy;
-              }
-              dx -= accx;
-              dy -= accy;
-            }
-            data.push(this.encodeRecord(dx, dy, 'STITCH'));
-          }
-        }
-      }
-
-      // end of file
-      data.push(this.encodeRecord(0, 0, 'END'));
-
-      // save the file
+  Utils: {
+    padLeft: function(string, length, char = " ") { return string.substring(0, length).padStart(length, char); },
+    padRight: function(string, length, char = " ") { return string.substring(0, length).padEnd(length, char); },
+    integerToBinary: function(value, bytes, endien = 'L') {
+      let byteArray = new Uint8Array(bytes);
+      for (let i = 0; i < bytes; i++) byteArray[i] = (value >> (i * 8)) & 0xFF;
+      if (endien === 'B') byteArray.reverse();
+      else if (endien !== 'L') alert(`[Stitch.IO.Utils.integerToBinary] Unexpected endien value: ${endien}`);
+      return byteArray;
+    },
+    saveData: function(data, filename) {
       let blob = new Blob(data, {type: "application/octet-stream"});
       let url = window.URL.createObjectURL(blob);
       let a = document.createElement("a");
@@ -744,7 +648,277 @@ Stitch.Writer = {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     }
+  },
+
+  Writers: {
+
+    DST: class {
+
+      constructor() { this.data = []; }
+
+      bit(b) { return 1 << b; }
+
+      encodeRecord(x, y, flag) {
+        y = -y;
+        let b0 = 0;
+        let b1 = 0;
+        let b2 = 0;
+        switch (flag) {
+          case 'JUMP':
+          case 'SEQUIN_EJECT':
+            b2 += this.bit(7);
+            // fallthrough
+          case 'STITCH':
+            b2 += this.bit(0);
+            b2 += this.bit(1);
+            if (x > 40) { b2 += this.bit(2); x -= 81; }
+            if (x < -40) { b2 += this.bit(3); x += 81; }
+            if (x > 13) { b1 += this.bit(2); x -= 27; }
+            if (x < -13) { b1 += this.bit(3); x += 27; }
+            if (x > 4) { b0 += this.bit(2); x -= 9; }
+            if (x < -4) { b0 += this.bit(3); x += 9; }
+            if (x > 1) { b1 += this.bit(0); x -= 3; }
+            if (x < -1) { b1 += this.bit(1); x += 3; }
+            if (x > 0) { b0 += this.bit(0); x -= 1; }
+            if (x < 0) { b0 += this.bit(1); x += 1; }
+            if (x != 0) console.log("[Stitch Writer] Error: Write exceeded possible distance.");
+            if (y > 40) { b2 += this.bit(5); y -= 81; }
+            if (y < -40) { b2 += this.bit(4); y += 81; }
+            if (y > 13) { b1 += this.bit(5); y -= 27; }
+            if (y < -13) { b1 += this.bit(4); y += 27; }
+            if (y > 4) { b0 += this.bit(5); y -= 9; }
+            if (y < -4) { b0 += this.bit(4); y += 9; }
+            if (y > 1) { b1 += this.bit(7); y -= 3; }
+            if (y < -1) { b1 += this.bit(6); y += 3; }
+            if (y > 0) { b0 += this.bit(7); y -= 1; }
+            if (y < 0) { b0 += this.bit(6); y += 1; }
+            if (y != 0) console.log("[Stitch Writer] Error: Write exceeded possible distance.");
+            break;
+          case 'COLOR_CHANGE':
+            b2 = 0b11000011;
+            break;
+          case 'STOP':
+            b2 = 0b11110011;
+            break;
+          case 'END':
+            b2 = 0b11110011;
+            break;
+          case 'SEQUIN_MODE':
+            b2 = 0b01000011;
+            break;
+          default:
+            console.log(`Unexpected flag: ${flag}`);
+        }
+        return new Uint8Array([b0, b1, b2]);
+      }
+
+      write(stitchPattern, filename) {
+        this.data = [];
+        this.data.push(`LA:${Stitch.IO.Utils.padRight(filename.split(".")[0], 16, " ")}\r`);
+        this.data.push(`ST:${Stitch.IO.Utils.padLeft(stitchPattern.stitchCount.toString(), 7, " ")}\r`);
+        this.data.push(`CO:${Stitch.IO.Utils.padLeft((stitchPattern.threads.length - 1).toString(), 3, " ")}\r`);
+        this.data.push(`+X:${Stitch.IO.Utils.padLeft(Math.ceil(0.1 * 0.5 * stitchPattern.width).toString(), 5, " ")}\r`);
+        this.data.push(`-X:${Stitch.IO.Utils.padLeft(Math.ceil(0.1 * 0.5 * stitchPattern.width).toString(), 5, " ")}\r`);
+        this.data.push(`+Y:${Stitch.IO.Utils.padLeft(Math.ceil(0.1 * 0.5 * stitchPattern.height).toString(), 5, " ")}\r`);
+        this.data.push(`-Y:${Stitch.IO.Utils.padLeft(Math.ceil(0.1 * 0.5 * stitchPattern.height).toString(), 5, " ")}\r`);
+        this.data.push('AX:+    0\r');
+        this.data.push('AY:+    0\r');
+        this.data.push('MX:+    0\r');
+        this.data.push('MY:+    0\r');
+        this.data.push('PD:******\r');
+        this.data.push(new Uint8Array([0x1a]));
+        this.data.push(" ".repeat(387));
+        this.encodeStitches(stitchPattern);
+        this.data.push(this.encodeRecord(0, 0, 'END'));
+        Stitch.IO.Utils.saveData(this.data, filename);
+      }
+
+      encodeStitches(stitchPattern) {
+        let xx = 0;
+        let yy = 0;
+        for (let i = 0; i < stitchPattern.threads.length; i++) {
+          if (i > 0) this.data.push(this.encodeRecord(0, 0, 'COLOR_CHANGE'));
+          for (let run of stitchPattern.threads[i].runs) {
+            for (let j = 0; j < run.length; j++) {
+              let stitch = run[j];
+              let x = 10 * stitch.x;
+              let y = 10 * stitch.y;
+              let dx = Math.round(x - xx);
+              let dy = Math.round(y - yy);
+              xx += dx;
+              yy += dy;
+              if (Math.abs(dx) >= 121 || Math.abs(dy) >= 121) {
+                let steps = Math.max(Math.abs(0.01 * dx), Math.abs(0.01 * dy)) + 1;
+                let inc = 1 / steps;
+                let accx = 0;
+                let accy = 0;
+                let ddx = Math.round(dx * inc);
+                let ddy = Math.round(dy * inc);
+                for (let j = 0; j < steps - 1; j++) {
+                  this.data.push(this.encodeRecord(ddx, ddy, 'JUMP'));
+                  accx += ddx;
+                  accy += ddy;
+                }
+                dx -= accx;
+                dy -= accy;
+              }
+              this.data.push(this.encodeRecord(dx, dy, j === 0 ? 'JUMP' : 'STITCH'));
+            }
+          }
+        }
+      }
+      
+    },
+
+    PES: class {
+
+      constructor() { this.data = []; }
+
+      writeString(string) { this.data.push(string); }
+      writeBytes(bytes) { this.data.push(bytes); }
+      writeInt(value, bytes, endien = 'L') { this.data.push(Stitch.IO.Utils.integerToBinary(value, bytes, endien)); }
+
+      write(stitchPattern, filename) {
+        this.data = [];
+        this.writeString('#PES0001');
+        this.writeBytes(new Uint8Array([0x16]));
+        this.writeBytes(new Uint8Array(new Array(13).fill(0x00)));
+        this.writeString(`LA:${Stitch.IO.Utils.padRight(filename.split(".")[0].substring(0, 8), 16, " ")}\r`);
+        this.writeBytes(new Uint8Array(new Array(12).fill(0x20)));
+        this.writeBytes(new Uint8Array([0xFF]));
+        this.writeBytes(new Uint8Array([0x00]));
+        this.writeBytes(new Uint8Array([0x06]));
+        this.writeBytes(new Uint8Array([0x26]));
+        this.writeBytes(new Uint8Array(new Array(12).fill(0x20)));
+        this.writeInt(stitchPattern.threads.length - 1, 1, 'L');
+
+        // todo: implemenet color matching
+        let colorList = [0x05, 0x38, 0x15];
+        for (let i = 0; i < stitchPattern.threads.length; i++) {
+          this.writeInt(colorList[i % 3], 1, 'L');
+        }
+
+        this.writeBytes(new Uint8Array(new Array(463 - stitchPattern.threads.length).fill(0x20)));
+        this.writeBytes(new Uint8Array([0x00, 0x00]));
+        let graphicsOffsetValue = new Uint8Array(3);
+        this.writeBytes(graphicsOffsetValue);
+        this.writeBytes(new Uint8Array([0x31]));
+        this.writeBytes(new Uint8Array([0xFF]));
+        this.writeBytes(new Uint8Array([0xF0]));
+        this.writeInt(2 * Math.ceil(10 * 0.5 * stitchPattern.width), 2, 'L');
+        this.writeInt(2 * Math.ceil(10 * 0.5 * stitchPattern.height), 2, 'L');
+        this.writeBytes(new Uint8Array([0xE0, 0x01]));
+        this.writeBytes(new Uint8Array([0xB0, 0x01]));
+        this.writeInt(0x9000 + Math.ceil(10 * 0.5 * stitchPattern.width), 2, 'B');
+        this.writeInt(0x9000 + Math.ceil(10 * 0.5 * stitchPattern.height), 2, 'B');
+        let stitchEncodingByteCount = this.encodeStitches(stitchPattern);
+        let graphicsOffsetBytes = Stitch.IO.Utils.integerToBinary(20 + stitchEncodingByteCount, 3, 'L');
+        for (let i = 0; i < 3; i++) graphicsOffsetValue[i] = graphicsOffsetBytes[i];
+        for (let i = 0; i < stitchPattern.threads.length + 1; i++) this.writePECGraphics();
+        Stitch.IO.Utils.saveData(this.data, filename);
+      }
+
+      encodeCommand(command, dx, dy) {
+        switch (command) {
+          case 'STITCH':
+            if (dx < 63 && dx > -64 && dy < 63 && dy > -64) {
+              this.writeInt((dx >>> 0) & 0b01111111, 1, 'L');
+              this.writeInt((dy >>> 0) & 0b01111111, 1, 'L');
+              return 2;
+            } else {
+              this.writeInt(((dx >>> 0) & 0b00001111_11111111) | 0b10000000_00000000, 2, 'B');
+              this.writeInt(((dy >>> 0) & 0b00001111_11111111) | 0b10000000_00000000, 2, 'B');
+              return 4;
+            }
+            break;
+          case 'TRIM':
+            this.writeInt(((dx >>> 0) & 0b00001111_11111111) | 0b10100000_00000000, 2, 'B');
+            this.writeInt(((dy >>> 0) & 0b00001111_11111111) | 0b10100000_00000000, 2, 'B');
+            return 4;
+            break;
+          case 'COLOR_CHANGE':
+            this.writeBytes(new Uint8Array([0xFE]));
+            this.writeBytes(new Uint8Array([0xB0]));
+            this.writeInt(dx % 2 === 0 ? 2 : 1, 1, 'L');
+            return 3;
+            break;
+          case 'END':
+            this.writeBytes(new Uint8Array([0xFF]));
+            return 1;
+            break;
+          default:
+            console.log(`Unexpected command: ${command}`);
+        }
+      }
+
+      encodeStitches(stitchPattern) {
+        let byteCounter = 0;
+        let [xx, yy] = [0, 0];
+        for (let i = 0; i < stitchPattern.threads.length; i++) {
+          if (i > 0) byteCounter += this.encodeCommand('COLOR_CHANGE', i - 1, 0);
+          for (let j = 0; j < stitchPattern.threads[i].runs.length; j++) {
+            for (let k = 0; k < stitchPattern.threads[i].runs[j].length; k++) {
+              let stitch = stitchPattern.threads[i].runs[j][k];
+              let dx = Math.round(10 * stitch.x - xx);
+              let dy = Math.round(10 * stitch.y - yy);
+              xx += dx;
+              yy += dy;
+              if (k === 0) {
+                byteCounter += this.encodeCommand('TRIM', dx, dy);
+                byteCounter += this.encodeCommand('STITCH', 0, 0);
+                dx = 0;
+                dy = 0;
+              }
+              byteCounter += this.encodeCommand('STITCH', dx, dy);
+            }
+          }
+        }
+        byteCounter += this.encodeCommand('END', 0, 0);
+        return byteCounter;
+      }
+
+      writePECGraphics() {
+        this.writeBytes(new Uint8Array([
+          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0xFF,
+          0xFF, 0xFF, 0xFF, 0x0F, 0x08, 0x00, 0x00, 0x00,
+          0x00, 0x10, 0x04, 0x00, 0x00, 0x00, 0x00, 0x20,
+          0x02, 0x00, 0x00, 0x00, 0x00, 0x40, 0x02, 0x00,
+          0x00, 0x00, 0x00, 0x40, 0x02, 0x00, 0x00, 0x00,
+          0x00, 0x40, 0x02, 0x00, 0x00, 0x00, 0x00, 0x40,
+          0x02, 0x00, 0x00, 0x00, 0x00, 0x40, 0x02, 0x00,
+          0x00, 0x00, 0x00, 0x40, 0x02, 0x00, 0x00, 0x00,
+          0x00, 0x40, 0x02, 0x00, 0x00, 0x00, 0x00, 0x40,
+          0x02, 0x00, 0x00, 0x00, 0x00, 0x40, 0x02, 0x00,
+          0x00, 0x00, 0x00, 0x40, 0x02, 0x00, 0x00, 0x00,
+          0x00, 0x40, 0x02, 0x00, 0x00, 0x00, 0x00, 0x40,
+          0x02, 0x00, 0x00, 0x00, 0x00, 0x40, 0x02, 0x00,
+          0x00, 0x00, 0x00, 0x40, 0x02, 0x00, 0x00, 0x00,
+          0x00, 0x40, 0x02, 0x00, 0x00, 0x00, 0x00, 0x40,
+          0x02, 0x00, 0x00, 0x00, 0x00, 0x40, 0x02, 0x00,
+          0x00, 0x00, 0x00, 0x40, 0x02, 0x00, 0x00, 0x00,
+          0x00, 0x40, 0x02, 0x00, 0x00, 0x00, 0x00, 0x40,
+          0x02, 0x00, 0x00, 0x00, 0x00, 0x40, 0x02, 0x00,
+          0x00, 0x00, 0x00, 0x40, 0x02, 0x00, 0x00, 0x00,
+          0x00, 0x40, 0x02, 0x00, 0x00, 0x00, 0x00, 0x40,
+          0x02, 0x00, 0x00, 0x00, 0x00, 0x40, 0x02, 0x00,
+          0x00, 0x00, 0x00, 0x40, 0x02, 0x00, 0x00, 0x00,
+          0x00, 0x40, 0x02, 0x00, 0x00, 0x00, 0x00, 0x40,
+          0x02, 0x00, 0x00, 0x00, 0x00, 0x40, 0x02, 0x00,
+          0x00, 0x00, 0x00, 0x40, 0x04, 0x00, 0x00, 0x00,
+          0x00, 0x20, 0x08, 0x00, 0x00, 0x00, 0x00, 0x10,
+          0xF0, 0xFF, 0xFF, 0xFF, 0xFF, 0x0F, 0x00, 0x00,
+          0x00, 0x00, 0x00, 0x00
+        ]));
+      }
+
+    }
+
+  },
+
+  Readers: {
+
   }
+
 }
 
 class StitchRunTemaplate {
