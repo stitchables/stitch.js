@@ -47,7 +47,6 @@
 			let shape = csgShapes[0];
 			for (let i = 1; i < csgShapes.length; i++) shape = shape.union(csgShapes[i]);
 			let polylines = shape.toPolylines();
-			console.log(polylines);
 
 			// create the runs and add them to the thread
 			for (let polyline of polylines) thread.addRun(new Stitch.Runs.Run(1, polyline));

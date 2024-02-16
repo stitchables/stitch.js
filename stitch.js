@@ -565,22 +565,28 @@ Stitch.CSG = {
       return shape;
     }
     clone() { return new Stitch.CSG.Shape(this.segments.map(function(p) { return p.clone(); })); }
-    toPolylines() {
+    toPolylines(epsilon = 1) {
       var polylines = [];
       var list = this.segments.slice();
       var findNext = function(extremum) {
+        let minVertex = { index: 0, distance: Infinity };
         for (var i = 0; i < list.length; i++) {
-          if (list[i].vertices[0].squaredDistance(extremum) < 1) {
-            var result = list[i].clone();
-            list.splice(i, 1);
-            return result;
+          let distance = list[i].vertices[0].squaredDistance(extremum);
+          if (distance < minVertex.distance) {
+            minVertex.index = i;
+            minVertex.distance = distance;
           }
+        }
+        if (minVertex.distance < epsilon) {
+          var result = list[minVertex.index].clone();
+          list.splice(minVertex.index, 1);
+          return result;
         }
         return false;
       }
       var currentIndex = 0;
       while (list.length > 0) {
-        polylines[currentIndex] = polylines[currentIndex] || new Stitch.Math.Polyline();
+        polylines[currentIndex] = polylines[currentIndex] || new Stitch.Math.Polyline(true);
         if (polylines[currentIndex].vertices.length == 0) {
           polylines[currentIndex].vertices.push(list[0].vertices[0]);
           polylines[currentIndex].vertices.push(list[0].vertices[1]);
@@ -590,6 +596,7 @@ Stitch.CSG = {
         if (next) {
           polylines[currentIndex].vertices.push(next.vertices[1]);
         } else {
+          // console.log("here")
           currentIndex++;
         }
       }
