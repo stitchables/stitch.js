@@ -28,121 +28,83 @@
 			let blueThread = pattern.addThread(0, 0, 255);
 
 			// create the border run
-			let padding = 5;
-			let borderLine = [
-				new Stitch.Utils.Vector(padding, padding),
-				new Stitch.Utils.Vector(pattern.vWidth - padding, padding),
-				new Stitch.Utils.Vector(pattern.vWidth - padding, pattern.vHeight - padding),
-				new Stitch.Utils.Vector(padding, pattern.vHeight - padding)
-			];
-			let roundedBorderLine = Stitch.Utils.getRoundedLine(borderLine, 4 * padding, true);
-			let borderRun = new StitchRuns.Satin(2 * padding, 0.1);
-			for (let point of roundedBorderLine) {
-				borderRun.addPoint(point.x, point.y);
-			}
-			redThread.addRun(borderRun);
+			let border = Stitch.Math.Polyline.fromVectors([
+				new Stitch.Math.Vector(0, 0), new Stitch.Math.Vector(pattern.width, 0),
+				new Stitch.Math.Vector(pattern.width, pattern.height), new Stitch.Math.Vector(0, pattern.height)
+			], true);
+			let padding = 3;
+			redThread.addRun(new Stitch.Runs.Satin(2 * padding, 0.2, border.getOffset(-padding).getRounded(4 * padding)));
 
 			// create the "stitch" run
 			for (let letter of stitchData.letters) {
 				for (let path of letter.paths) {
-					let run = new StitchRuns.Run(1);
+					let polyline = new Stitch.Math.Polyline(true);
 					for (let i = 0; i < path.length; i += 2) {
-						let x = 0.7 * pattern.vWidth * path[i] / stitchData.size + 0.45 * pattern.vWidth;
-						let y = 0.7 * pattern.vWidth * path[i + 1] / stitchData.size + 0.3 * pattern.vHeight;
-						run.addPoint(x, y);
+						let x = 0.7 * pattern.width * path[i] / stitchData.size + 0.45 * pattern.width;
+						let y = 0.7 * pattern.width * path[i + 1] / stitchData.size + 0.3 * pattern.height;
+						polyline.addVertex(x, y);
 					}
-					run.points.push(run.points[0]);
-					greenThread.addRun(run);
+					for (let i = -5; i <= 5; i++) greenThread.addRun(new Stitch.Runs.Run(2, polyline.getOffset(0.25 * i)));
 				}
 			}
 
-			// create a custom run for "ables"
-			class CustomRun extends StitchRunTemaplate {
-				constructor(width, density, invert) {
-					super();
-					this.width = width;
+			class CustomRun {
+				constructor(width, density, invert, polyline) {
 					this.density = density;
 					this.invert = invert;
-					this.points = [];
-				}
-				addPoint(x, y) {
-					this.points.push(new Stitch.Utils.Vector(x, y));
+					this.polyline = polyline;
+					this.inset = polyline.getOffset(-0.5 * width);
+					this.outset = polyline.getOffset(0.5 * width);
 				}
 				getStitches(pixelsPerUnit) {
-					if (pixelsPerUnit > 4) {
-						let resampled = Stitch.Utils.resampleLineBySpacing(this.points, pixelsPerUnit * this.density, true);
-						let stitches = [];
-						for (let point of resampled) stitches.push(point);
-						stitches.push(stitches[0]);
-						return stitches;
-					} else {
-						let eps = 0;
-						let resampled;
-						do {
-							resampled = Stitch.Utils.resampleLineBySpacing(this.points, pixelsPerUnit * this.density - eps, true);
-							eps += 0.01;
-						} while (resampled.length % 2 !== 0);
-						let stitches = [];
-						for (let i = 1; i < resampled.length + 1; i++) {
-							let prev = resampled[(i - 1) % resampled.length];
-							let curr = resampled[(i + 0) % resampled.length];
-							let next = resampled[(i + 1) % resampled.length];
-							let normal = new Stitch.Utils.Vector(0, 0);
-							normal = normal.add(curr.subtract(prev).normalized());
-							normal = normal.add(next.subtract(curr).normalized());
-							normal = normal.normalized().rotate(0.5 * Math.PI);
-							if (normal.x && normal.y) {
-								if (this.invert) {
-									if (i % 2 === 0) stitches.push(curr.add(normal.multiply(0.5 * this.width)));
-									else stitches.push(curr.subtract(normal.multiply(0.5 * this.width)));
-								} else {
-									if (i % 2 === 1) stitches.push(curr.add(normal.multiply(0.5 * this.width)));
-									else stitches.push(curr.subtract(normal.multiply(0.5 * this.width)));
-								}
-							}
+					let resampled, eps = 0;
+					do { eps += 0.01; resampled = this.polyline.getResampledBySpacing(pixelsPerUnit * this.density - eps); }
+					while (resampled.vertices.length % 2 !== 0);
+					let insetResampled = this.inset.getResampledBySpacing(0.25 * (pixelsPerUnit * this.density - eps));
+					let outsetResampled = this.outset.getResampledBySpacing(0.25 * (pixelsPerUnit * this.density - eps));
+					let stitches = [];
+					for (let i = 0; i < resampled.vertices.length; i++) {
+						if (i % 2 === 0) {
+							if (this.invert) stitches.push(insetResampled.getClosestVertex(resampled.vertices[i]));
+							else stitches.push(outsetResampled.getClosestVertex(resampled.vertices[i]));
+						} else {
+							if (this.invert) stitches.push(outsetResampled.getClosestVertex(resampled.vertices[i]));
+							else stitches.push(insetResampled.getClosestVertex(resampled.vertices[i]));
 						}
-						stitches.push(stitches[0]);
-						return stitches;
 					}
+					stitches.push(stitches[0]);
+					return stitches;
 				}
 			}
 
 			// create the "ables" run
 			for (let letter of ablesData.letters) {
 				for (let path of letter.paths) {
-					let run = new CustomRun(2, 2, false);
-					let runInverted = new CustomRun(2, 2, true);
+					let polyline = new Stitch.Math.Polyline(true);
 					for (let i = 0; i < path.length; i += 2) {
-						let x = 0.7 * pattern.vWidth * path[i] / stitchData.size + 0.55 * pattern.vWidth;
-						let y = 0.7 * pattern.vWidth * path[i + 1] / stitchData.size + 0.7 * pattern.vHeight;
-						run.addPoint(x, y);
-						runInverted.addPoint(x, y);
+						let x = 0.7 * pattern.width * path[i] / stitchData.size + 0.55 * pattern.width;
+						let y = 0.7 * pattern.width * path[i + 1] / stitchData.size + 0.7 * pattern.height;
+						polyline.addVertex(x, y);
 					}
-					blueThread.addRun(run);
-					blueThread.addRun(runInverted);
+					let roundedPolyline = polyline.getSimplified(2).getRounded(2);
+					blueThread.addRun(new CustomRun(3, 2, false, roundedPolyline));
+					blueThread.addRun(new CustomRun(3, 2, true, roundedPolyline));
 				}
 			}
 
 			// draw the pattern
-			let svg = pattern.drawSvg(window.innerWidth, window.innerHeight);
-
-			// redraw pattern as the window is resized
-			window.addEventListener("resize", Stitch.Utils.debounce(() => {
-				document.body.removeChild(svg);
-				svg = pattern.drawSvg(window.innerWidth, window.innerHeight);
+			let options = { showStitches: false };
+			let svg = pattern.draw(window.innerWidth, window.innerHeight, options);
+			window.addEventListener("resize", Stitch.Browser.debounce(() => { // redraw as window resized
+				svg.remove(); svg = pattern.draw(window.innerWidth, window.innerHeight, options);
 			}));
 
+			// create the download modal and add the event listener
+			let modal = Stitch.Browser.getDownloadModal(pattern, "businessCard", document.body);
+			window.addEventListener("keydown", (e) => { if (e.code === "KeyD") modal.open(); });
+
 			// create the function for stitchables output
-			function generateEmbroiderySVG(widthMM, heightMM) {
-				return pattern.getSvgString(widthMM, heightMM);
-			}
-
-			// print the string out to the console for testing
-			console.log(generateEmbroiderySVG(Stitch.Utils.inchesToMillimeters(2), Stitch.Utils.inchesToMillimeters(2)));
-
-			// download the embroidery file
-			// Stitch.IO.write(pattern, "businessCard.dst", Stitch.Utils.inchesToMillimeters(3.5), Stitch.Utils.inchesToMillimeters(2));
-			Stitch.IO.write(pattern, "businessCard.pes", Stitch.Utils.inchesToMillimeters(3.5), Stitch.Utils.inchesToMillimeters(2));
+			function generateEmbroiderySVG(width, height) { return Stitch.Browser.serializeToString(pattern.getSvg(width, height)); }
 
 		</script>
 	</body>

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+
+	<head>
+		<script src="../stitch.js"></script>
+		<script>
+			function random_hash() {
+				let [chars, result] = ["0123456789abcdef", "0x"];
+				for (let i = 64; i > 0; --i) result += chars[Math.floor(Math.random() * chars.length)];
+				return result;
+			}
+			let tokenData = {"hash":random_hash()}
+		</script>
+		<style>
+			svg {
+				margin: auto;
+				position: absolute;
+				inset: 0;
+			}
+		</style>
+	</head>
+
+	<body>
+		<script>
+
+			// setup the RNG
+			let R = new Stitch.Math.Random(tokenData.hash);
+
+			// create a new pattern
+			let pattern = new Stitch.Pattern(500, 500);
+
+			// add the thread
+			let thread = pattern.addThread(0, 0, 0);
+
+			// create the CSG shapes
+			let csgShapes = [];
+			for (let i = 0; i < 10; i++) {
+				let r = Stitch.Math.Utils.map(R.random_dec(), 0, 1, 50, 100);
+				let cx = Stitch.Math.Utils.map(R.random_dec(), 0, 1, r, pattern.width - r);
+				let cy = Stitch.Math.Utils.map(R.random_dec(), 0, 1, r, pattern.height - r);
+				let polyline = new Stitch.Math.Polyline(true);
+				for (let a = 0; a < 2 * Math.PI; a += 0.1) polyline.addVertex(r * Math.cos(a) + cx, r * Math.sin(a) + cy);
+				csgShapes.push(Stitch.CSG.Shape.fromPolylines([polyline]));
+			}
+
+			// perform the polygon clipping
+			let shape = csgShapes[0];
+			for (let i = 1; i < csgShapes.length; i++) shape = shape.union(csgShapes[i]);
+			let polylines = shape.toPolylines();
+			console.log(polylines);
+
+			// create the runs and add them to the thread
+			for (let polyline of polylines) thread.addRun(new Stitch.Runs.Run(1, polyline));
+
+			// draw the pattern
+			let options = { showStitches: false };
+			let svg = pattern.draw(window.innerWidth, window.innerHeight, options);
+			svg.setAttribute("style", "margin: auto; position: absolute; inset: 0;");
+			window.addEventListener("resize", Stitch.Browser.debounce(() => { // redraw as window resized
+				svg.remove();
+				svg = pattern.draw(window.innerWidth, window.innerHeight, options);
+				svg.setAttribute("style", "margin: auto; position: absolute; inset: 0;");
+			}));
+
+			// create the download modal and add the event listener
+			let modal = Stitch.Browser.getDownloadModal(pattern, "circlePackSpiral", document.body);
+			window.addEventListener("keydown", (e) => { if (e.code === "KeyD") modal.open(); });
+
+			// create the function for stitchables output
+			function generateEmbroiderySVG(width, height) { return Stitch.Browser.serializeToString(pattern.getSvg(width, height)); }
+
+		</script>
+	</body>
+
+</html>

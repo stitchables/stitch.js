@@ -1,616 +1,557 @@
-<!DOCTYPE html>
+
 <html>
-
-	<head>
-		<script src="../stitch.js"></script>
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.8.0/p5.js"></script>
-	</head>
-
-	<body>
-		<script>
-
-			// generate the tokenData
-			function genTokenData(projectNum) {
-				let hash = "0x";
-				for (var i = 0; i < 64; i++) hash += Math.floor(Math.random() * 16).toString(16);
-				return { hash: hash, tokenId: (projectNum * 1000000 + Math.floor(Math.random() * 1000)).toString() };
-			}
-			let tokenData = genTokenData(0);
-			// tokenData = {"tokenId":"8000004","hash":"0xbb550f140aa5c83fb1684048317140ec3aff688383a7a89258072bfce24e075e"}
-			// tokenData = {hash: '0x6df1eda2393bb871f1a9ce51bbf2d6bef65136373b0cd2af813c4766a7bce06c', tokenId: '556'}
-			console.log(tokenData);
-
-			// set up the rng
-			S=Uint32Array.from([0,0,0,0].map(i=>parseInt(tokenData.hash.substr(i*8+5,8),16)));R=(a=1)=>a*(t=S[3],S[3]=S[2],S[2]=S[1],s=S[1]=S[0],t^=t<<11,S[0]^=(t^t>>>8)^(s>>>19),S[0]/2**32);
-			for (let i = 0; i < 999; i++) R();
-			function randomRange(iMin, iMax) { return map(R(), 0, 1, iMin, iMax); }
-
-			// create a new pattern
-			let pattern = new Stitch.Pattern(500, 500);
-			pattern.setBackgroundColor(200, 200, 200);
-
-			function setup() {
-
-				noCanvas();
-				noLoop();
-
-				// setup the features
-				let features = { rotationDirection: false, stitchType: "run", showCircles: false };
-				if (R() < 0.5) features.rotationDirection = true;
-				if (R() < 0.5) features.stitchType = 'satin';
-				if (R() < 0.2) features.showCircles = true;
-
-				// generate the circle packing
-				let cp;
-				do {
-					cp = genCP(pattern.vWidth, pattern.vHeight);
-					if (Object.keys(cp.int).length > 0) cp.resize(0, 0, pattern.vWidth, pattern.vHeight);
-				} while (cp.getMinOverlap() < -0.1 || cp.getMinRadius() < 0.05 * min(pattern.vWidth, pattern.vHeight) || Object.keys(cp.int).length < 1);
-
-				// create an array of keys
-				let cpMap = [];
-				for (let [key, c] of Object.entries(cp.pck)) cpMap.push(key);
-
-				// collect the edges
-				cp.getTriData();
-				let edges = new Set();
-				for (let t of cp.ts) {
-					for (let i = 0; i < 3; i++) {
-						let aIndex = cpMap.indexOf(t[i].toString());
-						let bIndex = cpMap.indexOf(t[(i + 1) % 3].toString());
-						let cIndex = cpMap.indexOf(t[(i + 2) % 3].toString());
-						if (t[i] < t[(i + 1) % 3]) {
-							edges.add({start: aIndex, end: bIndex});
-						}
-						if (t[i] < t[(i + 2) % 3]) {
-							edges.add({start: aIndex, end: cIndex});
-						}
-					}
-				}
-
-				// generate the graph
-				let g = new Stitch.Utils.Graph(Object.keys(cp.pck).length);
-				for (const edge of edges) g.addEdge(edge.start, edge.end);
-
-				// calculate the euler tour
-				let path = g.getEulerTour();
-
-				// collect the edges from the tour
-				let pathEdges = [];
-				for (let i = 0; i < path.length - 1; i++) pathEdges.push({start: path[i], end: path[i + 1]});
-
-				// break the path up
-				let usedEdges = new Set();
-				let brokenPaths = [[]];
-				for (let i = 0; i < pathEdges.length; i++) {
-					let edge = pathEdges[i];
-					if (usedEdges.has(`${edge.start},${edge.end}`)) {
-						if (brokenPaths[brokenPaths.length - 1].length > 0) {
-							brokenPaths.push([]);
-						}
-					} else {
-						usedEdges.add(`${edge.start},${edge.end}`);
-						usedEdges.add(`${edge.end},${edge.start}`);
-						brokenPaths[brokenPaths.length - 1].push(edge);
-					}
-				}
-				brokenPaths = brokenPaths.filter(brokenPath => brokenPath.length > 0);
-
-				// calculate the min distance to neighbors
-				let adj = Array.from(Array(cpMap.length), () => new Array());
-				for (let t of cp.ts) {
-					let aIndex = cpMap.indexOf(t[0].toString());
-					let bIndex = cpMap.indexOf(t[1].toString());
-					let cIndex = cpMap.indexOf(t[2].toString());
-					if (!adj[aIndex].includes(bIndex)) adj[aIndex].push(bIndex);
-					if (!adj[aIndex].includes(cIndex)) adj[aIndex].push(cIndex);
-					if (!adj[bIndex].includes(aIndex)) adj[bIndex].push(aIndex);
-					if (!adj[bIndex].includes(cIndex)) adj[bIndex].push(cIndex);
-					if (!adj[cIndex].includes(aIndex)) adj[cIndex].push(aIndex);
-					if (!adj[cIndex].includes(bIndex)) adj[cIndex].push(bIndex);
-				}
-				for (let i = 0; i < adj.length; i++) {
-					let current = cp.pck[cpMap[i]];
-					adj[i].sort((a, b) => {
-						let aNeighbor = cp.pck[cpMap[a]];
-						let bNeighbor = cp.pck[cpMap[b]];
-						return atan2(current.y - aNeighbor.y, current.x - aNeighbor.y) < atan2(current.y - bNeighbor.y, current.x - bNeighbor.y) ? -1 : 1;
-					});
-				}
-				
-				let test = Infinity;
-				let maxWidths = Array.from(Array(cpMap.length), () => new Array());
-				for (let i = 0; i < adj.length; i++) {
-					let current = cp.pck[cpMap[i]];
-					for (let j = 1; j < adj[i].length + 1; j++) {
-						let nPrev = cp.pck[cpMap[adj[i][(j - 1) % adj[i].length]]];
-						let nCurr = cp.pck[cpMap[adj[i][(j + 0) % adj[i].length]]];
-						let nNext = cp.pck[cpMap[adj[i][(j + 1) % adj[i].length]]];
-						let aPrev = atan2(current.y - nPrev.y, current.x - nPrev.x);
-						let aCurr = atan2(current.y - nCurr.y, current.x - nCurr.x);
-						let aNext = atan2(current.y - nNext.y, current.x - nNext.x);
-						let pPrev = createVector(current.r * cos(aPrev), current.r * sin(aPrev));
-						let pCurr = createVector(current.r * cos(aCurr), current.r * sin(aCurr));
-						let pNext = createVector(current.r * cos(aNext), current.r * sin(aNext));
-						maxWidths[i].push(min(pCurr.dist(pPrev), pCurr.dist(pNext)));
-						if (test > min(pCurr.dist(pPrev), pCurr.dist(pNext))) test = min(pCurr.dist(pPrev), pCurr.dist(pNext));
-					}
-				}
-
-				let maxWidthMM = 4.0;
-				let lines = [];
-				for (let i = 0; i < brokenPaths.length; i++) {
-					let path = [];
-					for (let j = 0; j < brokenPaths[i].length; j++) {
-						let startCircle = cp.pck[cpMap[brokenPaths[i][j].start]];
-						let endCircle = cp.pck[cpMap[brokenPaths[i][j].end]];
-						let angleOffset = atan2(startCircle.y - endCircle.y, startCircle.x - endCircle.x);
-						let startSpiral = new Spiral(createVector(startCircle.x, startCircle.y), startCircle.r, angleOffset + PI, 1, features.rotationDirection);
-						let endSpiral = new Spiral(createVector(endCircle.x, endCircle.y), endCircle.r, angleOffset, 1, features.rotationDirection);
-						let spiralPolyline = [];
-						let startSpiralPoints = startSpiral.getPoints();
-						let endSpiralPoints = endSpiral.getPoints().reverse();
-						maxWidthMM = 0.08 * test;
-						for (let k = 0; k < startSpiralPoints.length; k++) {
-							let v = new Stitch.Utils.Vector(startSpiralPoints[k].x, startSpiralPoints[k].y);
-							let w = map(k, 0, startSpiralPoints.length - 1, 0, maxWidthMM);
-							spiralPolyline.push({v, w});
-						}
-						for (let k = 0; k < endSpiralPoints.length; k++) {
-							let v = new Stitch.Utils.Vector(endSpiralPoints[k].x, endSpiralPoints[k].y);
-							let w = map(k, 0, endSpiralPoints.length - 1, maxWidthMM, 0);
-							spiralPolyline.push({v, w});
-						}
-						let resampled = resampleLineBySpacing(spiralPolyline, 5);
-						path.push(resampled);
-					}
-					lines.push(path);
-				}
-
-
-				if (features.showCircles) {
-					let circlesThread = pattern.addThread(0, 0, 255);
-					for (let [key, c] of Object.entries(cp.pck)) {
-						let circleRun = new StitchRuns.Run(1);
-						for (let a = 0; a < 2 * PI; a += 0.1) {
-							circleRun.addPoint(c.r * cos(a) + c.x, c.r * sin(a) + c.y);
-						}
-						circleRun.points.push(circleRun.points[0]);
-						circlesThread.addRun(circleRun);
-					}
-				}
-
-				let thread = pattern.addThread(0, 0, 0);
-				if (features.stitchType === 'satin') {
-					for (let i = 0; i < lines.length; i++) {
-						let customRun = new CustomRun(0.5, 1, 0.5);
-						for (let j = 0; j < lines[i].length; j++) {
-							customRun.addPath(lines[i][j]);
-						}
-						thread.addRun(customRun);
-					}
-				} else if (features.stitchType === 'run') {
-					for (let i = 0; i < lines.length; i++) {
-						let run = new StitchRuns.Run(1);
-						for (let j = 0; j < lines[i].length; j++) {
-							for (let k = 0; k < lines[i][j].length; k++) {
-								run.addPoint(lines[i][j][k].v.x, lines[i][j][k].v.y);
-							}
-						}
-						thread.addRun(run);
-					}
-				}
-
-				// draw the pattern
-				let svg = pattern.drawSvg(window.innerWidth, window.innerHeight);
-				svg.style.margin = "auto";
-				svg.style.position = "absolute";
-				svg.style.inset = 0;
-
-				// redraw pattern as the window is resized
-				window.addEventListener("resize", Stitch.Utils.debounce(() => {
-					document.body.removeChild(svg);
-					svg = pattern.drawSvg(window.innerWidth, window.innerHeight);
-					svg.style.margin = "auto";
-					svg.style.position = "absolute";
-					svg.style.inset = 0;
-				}, 100));
-
-				// print the string out to the console for testing
-				console.log(generateEmbroiderySVG(Stitch.Utils.inchesToMillimeters(5), Stitch.Utils.inchesToMillimeters(5)));
-
-				// download the embroidery file
-				// Stitch.IO.write(pattern, "circlePackSpiral.dst", Stitch.Utils.inchesToMillimeters(10), Stitch.Utils.inchesToMillimeters(10));
-				Stitch.IO.write(pattern, "circlePackSpiral.pes", Stitch.Utils.inchesToMillimeters(10), Stitch.Utils.inchesToMillimeters(10));
-
-			}
-
-			// create the function for stitchables output
-			function generateEmbroiderySVG(widthMM, heightMM) {
-				return pattern.getSvgString(widthMM, heightMM);
-			}
-
-			function resampleLineBySpacing(points, spacing) {
-				let totalLength = 0;
-				for (let i = 1; i < points.length; i++) totalLength += points[i % points.length].v.distance(points[i - 1].v);
-				let stepSize = totalLength / Math.floor(totalLength / spacing);
-				let result = [points[0]];
-				let currentStep = 0;
-				for (let i = 1; i < points.length; i++) {
-					let ds = points[i % points.length].v.distance(points[i - 1].v);
-					if (stepSize - currentStep > ds) {
-						currentStep += ds;
-					} else {
-						let totalStep = 0;
-						for (let j = stepSize - currentStep; j < ds; j += stepSize) {
-							result.push({v: points[i - 1].v.lerp(points[i % points.length].v, j / ds), w: (1 - j / ds) * points[i - 1].w + j / ds * points[i % points.length].w});
-							totalStep += stepSize;
-						}
-						currentStep += ds - totalStep;
-					}
-				}
-				result.push(points[points.length - 1]);
-				return result;
-			}
-
-			class CustomRun extends StitchRunTemaplate {
-				constructor(satinDensity, runDensity, satinCutoff) {
-					super();
-					this.satinDensity = satinDensity;
-					this.runDensity = runDensity;
-					this.satinCutoff = satinCutoff;
-					this.paths = [];
-				}
-				addPath(p) { this.paths.push(p); }
-				getStitches(pixelsPerUnit) {
-					let stitches = [];
-					for (let i = 0; i < this.paths.length; i++) {
-						let resampled = resampleLineBySpacing(this.paths[i], pixelsPerUnit * this.satinDensity);
-						let run = [];
-						for (let j = i === 0 ? 0 : 1; j < resampled.length; j++) {
-							let current = resampled[j];
-							if (current.w < this.satinCutoff * pixelsPerUnit) {
-								run.push(current.v);
-							} else if (run.length > 0) {
-								let resampledRun = Stitch.Utils.resampleLineBySpacing(run, pixelsPerUnit * this.runDensity);
-								for (let k = 0; k < resampledRun.length; k++) stitches.push(resampledRun[k]);
-								run = [];
-							} else {
-								let normal = new Stitch.Utils.Vector(0, 0);
-								if (j > 0) normal = normal.add(current.v.subtract(resampled[j - 1].v).normalized());
-								if (j < resampled.length - 1) normal = normal.add(resampled[j + 1].v.subtract(current.v).normalized());
-								normal = normal.normalized().rotate(0.5 * Math.PI);
-								stitches.push(current.v.add(normal.multiply(current.w)));
-								stitches.push(current.v.subtract(normal.multiply(current.w)));
-							}
-						}
-						if (run.length > 2) {
-							let resampledRun = Stitch.Utils.resampleLineBySpacing(run, pixelsPerUnit * this.runDensity);
-							for (let k = 0; k < resampledRun.length; k++) stitches.push(resampledRun[k]);
-						}
-					}
-					return stitches;
-				}
-			}
-
-			class Spiral {
-
-				constructor(c, r, a, t = 1, o = true) {
-					this.c = c; // center
-					this.r = r; // radius
-					this.a = a; // angle offset
-					this.t = t; // count turns
-					this.o = o; // orientation: true (clockwise) false (counter clockwise)
-					this.l = this.getLength();
-				}
-
-				getLength() {
-					let at = this.t * 2 * PI;
-					let bt = this.r / at;
-					return 0.5 * bt * (at * sqrt(1 + at * at) + log(at + sqrt(1 + at * at)));
-				}
-
-				getPointFromAngle(angle) {
-					let at = atan2(sin(angle - this.a + PI), cos(angle - this.a + PI));
-					let rt = map(at, -PI, PI, 0, this.r);
-					return createVector(this.c.x + rt * cos(angle), this.c.y + rt * sin(angle));
-				}
-
-				draw() {
-					let count = floor(this.l / 5);
-					beginShape();
-					for (let i = 0; i <= count; i++) {
-						let at = map(i, 0, count, 0, (this.o ? 1 : -1) * this.t * 2 * PI) + this.a;
-						let rt = map(i, 0, count, 0, this.r);
-						vertex(this.c.x + rt * cos(at), this.c.y + rt * sin(at));
-					}
-					endShape();
-				}
-
-				getPoints() {
-					let count = floor(this.l / 2);
-					let points = [];
-					for (let i = 0; i <= count; i++) {
-						let at = map(i, 0, count, 0, (this.o ? 1 : -1) * this.t * 2 * PI) + this.a;
-						let rt = map(i, 0, count, 0, this.r);
-						points.push(createVector(this.c.x + rt * cos(at), this.c.y + rt * sin(at)));
-					}
-					return points;
-				}
-
-			}
-
-			function genCP(w, h) {
-				let dt = new DT(w, h);
-				let count = floor(randomRange(10, 25));
-				for (let i = 0; i < count; i++) dt.add(randomRange(0, w), randomRange(0, h));
-				return new CP(dt, function(){ return randomRange(100, 300); });
-			}
-
-			class DT {
-
-				constructor(w, h) {
-					this.w = w;
-					this.h = h;
-					let center = createVector(w / 2, h / 2);
-					let radius = sqrt(sq(w) + sq(h)) / 2;
-					this.vs = [{"x": center.x - sqrt(3) * radius, "y": center.y - radius}, {"x": center.x + sqrt(3) * radius, "y": center.y - radius}, {"x": center.x, "y": center.y +  2 * radius}];
-					this.ts = [this.makeTri(0, 1, 2)];
-				}
-
-				add(x, y) {
-					if (x < 0 || y < 0 || x > this.w || y > this.h) return;
-					this.vs.push({"x": x, "y": y});
-					let nextTris = [];
-					let newTris = [];
-					for (let i = 0; i < this.ts.length; i++) {
-						if (dist(x, y, this.ts[i].cc.x, this.ts[i].cc.y) < this.ts[i].cc.r) {
-							newTris = newTris.concat(this.divTri(this.ts[i], this.vs.length - 1));
-						} else {
-							nextTris.push(this.ts[i]);
-						}
-					}
-					for (let i = 0; i < newTris.length; i++) {
-						let isBad = false;
-						for (let j = 0; j < this.vs.length; j++) {
-							if (this.isBadTri(newTris[i], j)) {
-								isBad = true;
-								break;
-							}
-						}
-						if (!isBad) {
-							nextTris.push(newTris[i]);
-						}
-					}
-					this.ts = nextTris;
-				}
-
-				makeTri(i1, i2, i3) {
-					let t = {"a": i1, "b": i2, "c": i3};
-					let v1 = this.vs[i1];
-					let v2 = this.vs[i2];
-					let v3 = this.vs[i3];
-					if ((v2.x - v1.x) * (v3.y - v2.y) - (v3.x - v2.x) * (v2.y - v1.y) < 0) {
-						t.b = i3;
-						t.c = i2;
-					}
-					let c = 2 * ((v2.x - v1.x) * (v3.y - v1.y) - (v2.y - v1.y) * (v3.x - v1.x));
-					let ccx = ((v3.y - v1.y) * (sq(v2.x) - sq(v1.x) + sq(v2.y) - sq(v1.y)) + (v1.y - v2.y) * (sq(v3.x) - sq(v1.x) + sq(v3.y) - sq(v1.y))) / c;
-					let ccy = ((v1.x - v3.x) * (sq(v2.x) - sq(v1.x) + sq(v2.y) - sq(v1.y)) + (v2.x - v1.x) * (sq(v3.x) - sq(v1.x) + sq(v3.y) - sq(v1.y))) / c;
-					t.cc = {"x": ccx, "y": ccy, "r": dist(v1.x, v1.y, ccx, ccy)};
-					return t;
-				}
-
-				divTri(t, i) { return [this.makeTri(t.a, t.b, i), this.makeTri(t.b, t.c, i), this.makeTri(t.c, t.a, i)]; }
-
-				isBadTri(t, i) {
-					if (t.a == i || t.b == i || t.c == i) return false;
-					else return dist(this.vs[i].x, this.vs[i].y, t.cc.x, t.cc.y) < t.cc.r;
-				}
-
-			}
-
-			class Cmplx {
-				constructor(a, b) {
-					this.re = a;
-					this.im = b;
-				}
-				add(c) { return new Cmplx(this.re + c.re, this.im + c.im); }
-				sub(c) { return new Cmplx(this.re - c.re, this.im - c.im); }
-				multRe(r) { return new Cmplx(this.re * r, this.im * r); }
-				divRe(r) { return new Cmplx(this.re / r, this.im / r); }
-				mult(c) { return new Cmplx(this.re * c.re - this.im * c.im, this.re * c.im + this.im * c.re); }
-			}
-
-			// the circle packing algorithm
-			class CP {
-
-				constructor(dt, rf = function(){ return random(10, 20); }, e = 1.0000000000001) {
-					this.dt = dt;
-					[this.int, this.ext] = this.getIntExt(dt, rf);
-					if (Object.keys(this.int).length > 0) this.pack(e);
-					this.ts = [];
-				}
-
-				getIntExt(dt, rf) {
-
-					// a mapping from all interior circles to their neighbors
-					let int = {};
-
-					// a mapping from all exterior circles to their target radius
-					let ext = {};
-
-					// get rid of first 3 points in the delaunay triangulation
-					dt.vs.splice(0, 3);
-
-					for (let i = dt.ts.length - 1; i >= 0; i--) {
-						let t = dt.ts[i];
-						if (t.a > 2 && t.b > 2 && t.c > 2) {
-							// adjust the index because we deleted the first 3 points
-							t.a -= 3;
-							t.b -= 3;
-							t.c -= 3;
-						} else {
-							// add placeholder for the target radius of exterior circles
-							if (t.a > 2) ext[t.a - 3] = rf();
-							if (t.b > 2) ext[t.b - 3] = rf();
-							if (t.c > 2) ext[t.c - 3] = rf();
-							// remove any triangles that contained any of the first 3 points
-							dt.ts.splice(i, 1);
-						}
-					}
-
-					// set up the neighbor mapping for interior circles
-					for (let i = 0; i < dt.ts.length; i++) {
-						let t = dt.ts[i];
-						if (!(t.a in int)) int[t.a] = new Set([t.b, t.c]);
-						else [t.b, t.c].forEach(int[t.a].add, int[t.a]);
-						if (!(t.b in int)) int[t.b] = new Set([t.a, t.c]);
-						else [t.a, t.c].forEach(int[t.b].add, int[t.b]);
-						if (!(t.c in int)) int[t.c] = new Set([t.a, t.b]);
-						else [t.a, t.b].forEach(int[t.c].add, int[t.c]);
-					}
-
-					// convert to array and sort the neighbors counter-clockwise
-					for (let [k, v] of Object.entries(int)) {
-						int[k] = Array.from(v).sort((a, b) => atan2(dt.vs[a].y - dt.vs[k].y, dt.vs[a].x - dt.vs[k].x) - atan2(dt.vs[b].y - dt.vs[k].y, dt.vs[b].x - dt.vs[k].x));
-					}
-
-					// make sure there are no external points in the internal keys
-					for (let [k, v] of Object.entries(ext)) delete int[k];
-
-					return [int, ext];
-
-				}
-
-				pack(e) {
-					this.r = {};
-					this.pl = {};
-					this.pck = {};
-
-					for (let [k, v] of Object.entries(this.ext)) this.r[k] = v;
-						for (let [k, v] of Object.entries(this.int)) this.r[k] = 1;
-
-						let lc = 2;
-						let cnt = 0;
-						while (lc > e && cnt < 50000) {
-							lc = 1;
-							for (let [k, v] of Object.entries(this.int)) {
-								let th = this.flower(k, v);
-								let hat = this.r[k] / (1 / sin(th / (2 * v.length)) - 1);
-								let newRad = hat * (1 / (sin(PI / v.length)) - 1);
-								let kc = max(newRad / this.r[k], this.r[k] / newRad);
-								this.r[k] = newRad;
-								lc = max(lc, kc);
-							}
-							cnt++;
-						}
-
-						let k1 = Object.keys(this.int)[0];
-						this.pl[k1] = new Cmplx(0, 0);
-						let k2 = this.int[k1][0];
-						this.pl[k2] = new Cmplx(this.r[k1] + this.r[k2], 0);
-						this.place(k1);
-						this.place(k2);
-
-						for (let [k, v] of Object.entries(this.int)) {
-							if (k in this.pl) this.pck[k] = {"x": this.pl[k].re, "y": this.pl[k].im, "r": this.r[k], "l": "interior"};
-						}
-						for (let [k, v] of Object.entries(this.ext)) {
-							if (k in this.pl) this.pck[k] = {"x": this.pl[k].re, "y": this.pl[k].im, "r": this.r[k], "l": "exterior"};
-						}
-					}
-
-					flower(cen, cyc) {
-						let s = 0;
-						for (let i = 0; i < cyc.length; i++) {
-							s += this.acxyz(this.r[cen], this.r[cyc[i]], this.r[cyc[(i + 1) % cyc.length]]);
-						}
-						return s;
-					}
-
-					acxyz(x, y, z) {
-						let a = (pow(x + y, 2) + pow(x + z, 2) - pow(y + z, 2)) / (2.0 * (x + y) * (x + z));
-						if (x + y == 0 || x + z == 0) return PI;
-						else if (abs(a) > 1) return PI / 3.0;
-						else return acos(a);
-					}
-
-					place(idx) {
-						if (idx in this.int) {
-							let cyc = this.int[idx];
-							for (let i = 0; i < 2 * cyc.length - 1; i++) {
-								if (cyc[i % cyc.length] in this.pl && !(cyc[(i + 1) % cyc.length] in this.pl)) {
-									let s = cyc[i % cyc.length];
-									let t = cyc[(i + 1) % cyc.length];
-									let th = this.acxyz(this.r[idx], this.r[s], this.r[t]);
-									let offset = this.pl[s].sub(this.pl[idx]).divRe(this.r[s] + this.r[idx]).mult(new Cmplx(cos(-th), sin(-th)));
-									this.pl[t] = this.pl[idx].add(offset.multRe(this.r[t] + this.r[idx]));
-									this.place(t);
-								}
-							}
-						}
-					}
-
-					resize(x, y, w, h) {
-						let vMin = createVector(Infinity, Infinity);
-						let vMax = createVector(-Infinity, -Infinity);
-						for (let [k, v] of Object.entries(this.pck)) {
-							vMin.x = min(vMin.x, v.x - v.r);
-							vMin.y = min(vMin.y, v.y - v.r);
-							vMax.x = max(vMax.x, v.x + v.r);
-							vMax.y = max(vMax.y, v.y + v.r);
-						}
-						let xDiff = vMax.x - vMin.x;
-						let yDiff = vMax.y - vMin.y;
-						let s = h / yDiff;
-						if (xDiff / yDiff > w / h) s = w / xDiff;
-						for (let [k, v] of Object.entries(this.pck)) {
-							v.x = s * (v.x - (vMin.x + 0.5 * xDiff)) + x + 0.5 * w;
-							v.y = s * (v.y - (vMin.y + 0.5 * yDiff)) + y + 0.5 * h;
-							v.r = s * v.r;
-						}
-					}
-
-					getTriData() {
-						for (let i = 0; i < this.dt.ts.length; i++) {
-							let t = this.dt.ts[i];
-							if (t.a in this.pck && t.b in this.pck && t.c in this.pck) {
-								this.ts.push([t.a, t.b, t.c]);
-							}
-						}
-					}
-
-					getMinOverlap() {
-						if (Object.keys(this.int).length === 0) return -Infinity;
-						let minSep = Infinity;
-						for (let [k, v] of Object.entries(this.pck)) {
-							if (v.l == 'exterior') {
-								let currMinSep = Infinity;
-								for (let [nk, nv] of Object.entries(this.pck)) {
-									if (k != nk && nv.l == 'exterior') {
-										let cDist = dist(v.x, v.y, nv.x, nv.y);
-										let rSum = v.r + nv.r;
-										let currSep = cDist - rSum;
-										if (currMinSep > currSep) currMinSep = currSep;
-									}
-								}
-								if (minSep > currMinSep) minSep = currMinSep;
-							}
-						}
-						return minSep;
-					}
-
-					getMinRadius() {
-						let minRadius = Infinity;
-						for (let [k, v] of Object.entries(this.pck)) {
-							if (v.r < minRadius) minRadius = v.r;
-						}
-						return minRadius;
-					}
-				}
-
-		</script>
-	</body>
-
-</html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+    <script>
+      function random_hash() {
+        let [chars, result] = ["0123456789abcdef", "0x"];
+        for (let i = 64; i > 0; --i) result += chars[Math.floor(Math.random() * chars.length)];
+        return result;
+      }
+      let tokenData = {"hash":random_hash()}
+    </script>
+    <script src="../stitch.js"></script>
+    <style type="text/css">
+      html {
+        height: 100%;
+      }
+      body {
+        min-height: 100%;
+        margin: 0;
+        padding: 0;
+      }
+      canvas {
+        padding: 0;
+        margin: auto;
+        display: block;
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        right: 0;
+      }
+    </style>
+  </head>
+<body>
+  <script>
+
+    class DT {
+        constructor(width, height) {
+          this.width = width;
+          this.height = height;
+          let center = new Stitch.Math.Vector(0.5 * width, 0.5 * height);
+          let radius = center.distance(new Stitch.Math.Vector(width, height));
+          this.vs = [
+            center.add(new Stitch.Math.Vector(-1 * Math.sqrt(3) * radius, -1 * radius)),
+            center.add(new Stitch.Math.Vector(Math.sqrt(3) * radius, -1 * radius)),
+            center.add(new Stitch.Math.Vector(0, 2 * radius))
+          ];
+          this.ts = [this.makeTriangle(0, 1, 2)];
+        }
+        add(x, y) {
+          if (x < 0 || y < 0 || x > this.w || y > this.h) return;
+          this.vs.push(new Stitch.Math.Vector(x, y));
+          let nextTris = [];
+          let newTris = [];
+          for (let i = 0; i < this.ts.length; i++) {
+            if (Stitch.Math.Utils.distance(x, y, this.ts[i].cc.x, this.ts[i].cc.y) < this.ts[i].cc.r) {
+              newTris = newTris.concat(this.divTri(this.ts[i], this.vs.length - 1));
+            } else {
+              nextTris.push(this.ts[i]);
+            }
+          }
+          for (let i = 0; i < newTris.length; i++) {
+            let isBad = false;
+            for (let j = 0; j < this.vs.length; j++) {
+              if (this.isBadTri(newTris[i], j)) {
+                isBad = true;
+                break;
+              }
+            }
+            if (!isBad) {
+              nextTris.push(newTris[i]);
+            }
+          }
+          this.ts = nextTris;
+        }
+        makeTriangle(i1, i2, i3) {
+          function sq(v) { return v * v; }
+          let t = {"a": i1, "b": i2, "c": i3};
+          let v1 = this.vs[i1];
+          let v2 = this.vs[i2];
+          let v3 = this.vs[i3];
+          if ((v2.x - v1.x) * (v3.y - v2.y) - (v3.x - v2.x) * (v2.y - v1.y) < 0) {
+            t.b = i3;
+            t.c = i2;
+          }
+          let c = 2 * ((v2.x - v1.x) * (v3.y - v1.y) - (v2.y - v1.y) * (v3.x - v1.x));
+          let ccx = ((v3.y - v1.y) * (sq(v2.x) - sq(v1.x) + sq(v2.y) - sq(v1.y)) + (v1.y - v2.y) * (sq(v3.x) - sq(v1.x) + sq(v3.y) - sq(v1.y))) / c;
+          let ccy = ((v1.x - v3.x) * (sq(v2.x) - sq(v1.x) + sq(v2.y) - sq(v1.y)) + (v2.x - v1.x) * (sq(v3.x) - sq(v1.x) + sq(v3.y) - sq(v1.y))) / c;
+          t.cc = {"x": ccx, "y": ccy, "r": v1.distance(new Stitch.Math.Vector(ccx, ccy))};
+          return t;
+        }
+        divTri(t, i) { return [this.makeTriangle(t.a, t.b, i), this.makeTriangle(t.b, t.c, i), this.makeTriangle(t.c, t.a, i)]; }
+        isBadTri(t, i) {
+          if (t.a == i || t.b == i || t.c == i) return false;
+          else return Stitch.Math.Utils.distance(this.vs[i].x, this.vs[i].y, t.cc.x, t.cc.y) < t.cc.r;
+        }
+      }
+
+      class Spiral {
+        constructor(c, r, a, t = 1, o = true) {
+          this.c = c; // center
+          this.r = r; // radius
+          this.a = a; // angle offset
+          this.t = t; // count turns
+          this.o = o; // orientation: true (clockwise) false (counter clockwise)
+          this.l = this.getLength();
+        }
+        getLength() {
+          let at = this.t * 2 * Math.PI;
+          let bt = this.r / at;
+          return 0.5 * bt * (at * Math.sqrt(1 + at * at) + Math.log(at + Math.sqrt(1 + at * at)));
+        }
+        getPointFromAngle(angle) {
+          let at = Math.atan2(Math.sin(angle - this.a + PI), Math.cos(angle - this.a + PI));
+          let rt = Stitch.Math.Utils.map(at, -PI, PI, 0, this.r);
+          return new Stitch.Math.Vector(this.c.x + rt * Math.cos(angle), this.c.y + rt * Math.sin(angle));
+        }
+        getPoints() {
+          let count = Math.floor(this.l / 2);
+          let points = [];
+          for (let i = 0; i <= count; i++) {
+            let at = Stitch.Math.Utils.map(i, 0, count, 0, (this.o ? 1 : -1) * this.t * 2 * Math.PI) + this.a;
+            let rt = Stitch.Math.Utils.map(i, 0, count, 0, this.r);
+            points.push(new Stitch.Math.Vector(this.c.x + rt * Math.cos(at), this.c.y + rt * Math.sin(at)));
+          }
+          return points;
+        }
+      }
+
+      class Cmplx {
+        constructor(a, b) { [this.re, this.im] = [a, b]; }
+        add(c) { return new Cmplx(this.re + c.re, this.im + c.im); }
+        sub(c) { return new Cmplx(this.re - c.re, this.im - c.im); }
+        multRe(r) { return new Cmplx(this.re * r, this.im * r); }
+        divRe(r) { return new Cmplx(this.re / r, this.im / r); }
+        mult(c) { return new Cmplx(this.re * c.re - this.im * c.im, this.re * c.im + this.im * c.re); }
+      }
+
+      class CP {
+        constructor(dt, rf = function(){ return random(10, 20); }, e = 1.0000000000001) {
+          this.dt = dt;
+          [this.int, this.ext] = this.getIntExt(dt, rf);
+          if (Object.keys(this.int).length > 0) this.pack(e);
+          this.ts = [];
+        }
+        getIntExt(dt, rf) {
+          // a mapping from all interior circles to their neighbors
+          let int = {};
+          // a mapping from all exterior circles to their target radius
+          let ext = {};
+          // get rid of first 3 points in the delaunay triangulation
+          dt.vs.splice(0, 3);
+          for (let i = dt.ts.length - 1; i >= 0; i--) {
+            let t = dt.ts[i];
+            if (t.a > 2 && t.b > 2 && t.c > 2) {
+              // adjust the index because we deleted the first 3 points
+              t.a -= 3;
+              t.b -= 3;
+              t.c -= 3;
+            } else {
+              // add placeholder for the target radius of exterior circles
+              if (t.a > 2) ext[t.a - 3] = rf();
+              if (t.b > 2) ext[t.b - 3] = rf();
+              if (t.c > 2) ext[t.c - 3] = rf();
+              // remove any triangles that contained any of the first 3 points
+              dt.ts.splice(i, 1);
+            }
+          }
+          // set up the neighbor mapping for interior circles
+          for (let i = 0; i < dt.ts.length; i++) {
+            let t = dt.ts[i];
+            if (!(t.a in int)) int[t.a] = new Set([t.b, t.c]);
+            else [t.b, t.c].forEach(int[t.a].add, int[t.a]);
+            if (!(t.b in int)) int[t.b] = new Set([t.a, t.c]);
+            else [t.a, t.c].forEach(int[t.b].add, int[t.b]);
+            if (!(t.c in int)) int[t.c] = new Set([t.a, t.b]);
+            else [t.a, t.b].forEach(int[t.c].add, int[t.c]);
+          }
+          // convert to array and sort the neighbors counter-clockwise
+          for (let [k, v] of Object.entries(int)) {
+            int[k] = Array.from(v).sort((a, b) => Math.atan2(dt.vs[a].y - dt.vs[k].y, dt.vs[a].x - dt.vs[k].x) - Math.atan2(dt.vs[b].y - dt.vs[k].y, dt.vs[b].x - dt.vs[k].x));
+          }
+          // make sure there are no external points in the internal keys
+          for (let [k, v] of Object.entries(ext)) delete int[k];
+          return [int, ext];
+        }
+        pack(e) {
+          this.r = {};
+          this.pl = {};
+          this.pck = {};
+          for (let [k, v] of Object.entries(this.ext)) this.r[k] = v;
+          for (let [k, v] of Object.entries(this.int)) this.r[k] = 1;
+          let lc = 2;
+          let cnt = 0;
+          while (lc > e && cnt < 50000) {
+            lc = 1;
+            for (let [k, v] of Object.entries(this.int)) {
+              let th = this.flower(k, v);
+              let hat = this.r[k] / (1 / Math.sin(th / (2 * v.length)) - 1);
+              let newRad = hat * (1 / (Math.sin(Math.PI / v.length)) - 1);
+              let kc = Math.max(newRad / this.r[k], this.r[k] / newRad);
+              this.r[k] = newRad;
+              lc = Math.max(lc, kc);
+            }
+            cnt++;
+          }
+          let k1 = Object.keys(this.int)[0];
+          this.pl[k1] = new Cmplx(0, 0);
+          let k2 = this.int[k1][0];
+          this.pl[k2] = new Cmplx(this.r[k1] + this.r[k2], 0);
+          this.place(k1);
+          this.place(k2);
+          for (let [k, v] of Object.entries(this.int)) {
+            if (k in this.pl) this.pck[k] = {"x": this.pl[k].re, "y": this.pl[k].im, "r": this.r[k], "l": "interior"};
+          }
+          for (let [k, v] of Object.entries(this.ext)) {
+            if (k in this.pl) this.pck[k] = {"x": this.pl[k].re, "y": this.pl[k].im, "r": this.r[k], "l": "exterior"};
+          }
+        }
+        flower(cen, cyc) {
+          let s = 0;
+          for (let i = 0; i < cyc.length; i++) s += this.acxyz(this.r[cen], this.r[cyc[i]], this.r[cyc[(i + 1) % cyc.length]]);
+          return s;
+        }
+        acxyz(x, y, z) {
+          let a = (Math.pow(x + y, 2) + Math.pow(x + z, 2) - Math.pow(y + z, 2)) / (2.0 * (x + y) * (x + z));
+          if (x + y == 0 || x + z == 0) return PI;
+          else if (Math.abs(a) > 1) return PI / 3.0;
+          else return Math.acos(a);
+        }
+        place(idx) {
+          if (idx in this.int) {
+            let cyc = this.int[idx];
+            for (let i = 0; i < 2 * cyc.length - 1; i++) {
+              if (cyc[i % cyc.length] in this.pl && !(cyc[(i + 1) % cyc.length] in this.pl)) {
+                let s = cyc[i % cyc.length];
+                let t = cyc[(i + 1) % cyc.length];
+                let th = this.acxyz(this.r[idx], this.r[s], this.r[t]);
+                let offset = this.pl[s].sub(this.pl[idx]).divRe(this.r[s] + this.r[idx]).mult(new Cmplx(Math.cos(-th), Math.sin(-th)));
+                this.pl[t] = this.pl[idx].add(offset.multRe(this.r[t] + this.r[idx]));
+                this.place(t);
+              }
+            }
+          }
+        }
+        resize(x, y, w, h) {
+          let optimalAngle = 0;
+          let optimalScale = 0;
+          let optimalVMin = new Stitch.Math.Vector(Infinity, Infinity);
+          let optimalVMax = new Stitch.Math.Vector(-Infinity, -Infinity);
+          for (let a = 0; a < 2 * Math.PI; a += 0.1) {
+            let vMin = new Stitch.Math.Vector(Infinity, Infinity);
+            let vMax = new Stitch.Math.Vector(-Infinity, -Infinity);
+            for (let [k, v] of Object.entries(this.pck)) {
+              let p = new Stitch.Math.Vector(v.x, v.y);
+              p = p.rotate(a);
+              vMin.x = Math.min(vMin.x, p.x - v.r);
+              vMin.y = Math.min(vMin.y, p.y - v.r);
+              vMax.x = Math.max(vMax.x, p.x + v.r);
+              vMax.y = Math.max(vMax.y, p.y + v.r);
+            }
+            let xDiff = vMax.x - vMin.x;
+            let yDiff = vMax.y - vMin.y;
+            let s = h / yDiff;
+            if (xDiff / yDiff > w / h) s = w / xDiff;
+            if (s > optimalScale) {
+              optimalAngle = a;
+              optimalScale = s;
+              optimalVMin = vMin;
+              optimalVMax = vMax;
+            }
+          }
+          for (let [k, v] of Object.entries(this.pck)) {
+            let p = new Stitch.Math.Vector(v.x, v.y);
+            p = p.rotate(optimalAngle);
+            let xDiff = optimalVMax.x - optimalVMin.x;
+            let yDiff = optimalVMax.y - optimalVMin.y;
+            v.x = optimalScale * (p.x - (optimalVMin.x + 0.5 * xDiff)) + x + 0.5 * w;
+            v.y = optimalScale * (p.y - (optimalVMin.y + 0.5 * yDiff)) + y + 0.5 * h;
+            v.r = optimalScale * v.r;
+          }
+        }
+        getTriData() {
+          for (let i = 0; i < this.dt.ts.length; i++) {
+            let t = this.dt.ts[i];
+            if (t.a in this.pck && t.b in this.pck && t.c in this.pck) this.ts.push([t.a, t.b, t.c]);
+          }
+        }
+        getMinOverlap() {
+          if (Object.keys(this.int).length === 0) return -Infinity;
+          let minSep = Infinity;
+          for (let [k, v] of Object.entries(this.pck)) {
+            if (v.l == 'exterior') {
+              let currMinSep = Infinity;
+              for (let [nk, nv] of Object.entries(this.pck)) {
+                if (k != nk && nv.l == 'exterior') {
+                  let cDist = Stitch.Math.Utils.distance(v.x, v.y, nv.x, nv.y);
+                  let rSum = v.r + nv.r;
+                  let currSep = cDist - rSum;
+                  if (currMinSep > currSep) currMinSep = currSep;
+                }
+              }
+              if (minSep > currMinSep) minSep = currMinSep;
+            }
+          }
+          return minSep;
+        }
+        getMinRadius() {
+          let minRadius = Infinity;
+          for (let [k, v] of Object.entries(this.pck)) if (v.r < minRadius) minRadius = v.r;
+          return minRadius;
+        }
+      }
+
+      function genCP(w, h) {
+        let dt = new DT(w, h);
+        let count = Math.floor(Stitch.Math.Utils.map(R.random_dec(), 0, 1, 10, 25));
+        for (let i = 0; i < count; i++) dt.add(w * R.random_dec(), h * R.random_dec());
+        return new CP(dt, function(){ return Stitch.Math.Utils.map(R.random_dec(), 0, 1, 100, 300); });
+      }
+
+      // define the width and height
+      let [width, height] = [1000, 750];
+
+      // setup the RNG
+      let R = new Stitch.Math.Random(tokenData.hash);
+
+      // setup the features
+      let features = { rotationDirection: false, stitchType: "run", showCircles: false };
+      if (R.random_dec() < 0.5) features.rotationDirection = true;
+      if (R.random_dec() < 0.5) features.stitchType = 'satin';
+      if (R.random_dec() < 0.5) features.showCircles = true;
+
+      // create a new pattern
+      let pattern = new Stitch.Pattern(width, height);
+
+      // add the thread
+      let thread = pattern.addThread(255, 255, 255);
+
+      // define the custom run
+      class VaryingWidthSatin {
+        constructor(width, density, widthCutoff, runDensity) {
+          this.width = width;
+          this.density = density;
+          this.widthCutoff = widthCutoff;
+          this.runDensity = runDensity;
+          this.polylines = [];
+        }
+        addPolyline(polyline) { this.polylines.push(polyline); }
+        getStitches(pixelsPerUnit) {
+          let stitches = [];
+          for (let n = 0; n < this.polylines.length; n++) {
+            let polyline = this.polylines[n];
+            let resampled = polyline.getResampledBySpacing(pixelsPerUnit * this.density).vertices;
+            let run = new Stitch.Math.Polyline();
+            for (let i = 0; i < resampled.length - 1; i++) {
+              let current = resampled[i];
+              let w = Stitch.Math.Utils.map(i, 0, resampled.length - 1, 0, 1);
+              if (n % 2 === 1) w = 1 - w;
+              w *= this.width;
+              if (w < this.widthCutoff * pixelsPerUnit) {
+                run.addVertex(current.x, current.y);
+              } else if (run.vertices.length > 0) {
+                let resampledRun = run.getResampledBySpacing(pixelsPerUnit * this.runDensity).vertices;
+                for (let k = 0; k < resampledRun.length; k++) {
+                  stitches.push(resampledRun[k]);
+                }
+                run.vertices = [];
+              } else {
+                let normal = new Stitch.Math.Vector(0, 0);
+                if (i > 0) normal = normal.add(current.subtract(resampled[i - 1]).normalized());
+                if (i < resampled.length - 1) normal = normal.add(resampled[i + 1].subtract(current).normalized());
+                normal = normal.normalized().rotate(0.5 * Math.PI);
+                stitches.push(current.add(normal.multiply(0.5 * w)));
+                stitches.push(current.subtract(normal.multiply(0.5 * w)));
+              }
+            }
+            if (run.vertices.length > 0) {
+              let resampledRun = run.getResampledBySpacing(pixelsPerUnit * this.runDensity).vertices;
+              for (let k = 0; k < resampledRun.length; k++) {
+                stitches.push(resampledRun[k]);
+              }
+            }
+          }
+          return stitches;
+        }
+      }
+
+      // generate the circle packing
+      let [cp, paths] = generateCirclePacking();
+
+      // add the runs
+      if (features.showCircles) {
+        for (let [key, c] of Object.entries(cp.pck)) {
+          let circle = new Stitch.Math.Polyline(true);
+          for (let a = 0; a < 2 * Math.PI; a += 0.1) {
+            circle.addVertex(c.r * Math.cos(a) + c.x, c.r * Math.sin(a) + c.y);
+          }
+          thread.addRun(new Stitch.Runs.Run(1, circle));
+        }
+      }
+      if (features.stitchType === 'satin') {
+        for (let path of paths) {
+          let varyingWidthSatin = new VaryingWidthSatin(12, 0.5, 1, 1);
+          for (let polyline of path) {
+            varyingWidthSatin.addPolyline(polyline);
+          }
+          thread.addRun(varyingWidthSatin);
+        }
+      } else if (features.stitchType === 'run') {
+        for (let path of paths) {
+          let fullPolyline = new Stitch.Math.Polyline();
+          for (let polyline of path) {
+            for (let vertex of polyline.vertices) {
+              fullPolyline.addVertex(vertex.x, vertex.y);
+            }
+          }
+          thread.addRun(new Stitch.Runs.Run(1, fullPolyline));
+        }
+      }
+
+      // draw the pattern
+      let options = { showStitches: false, pixelMultiplier: 2, strokeWidth: 2 };
+      let svg = pattern.draw(window.innerWidth, window.innerHeight, options);
+      svg.setAttribute("style", "margin: auto; position: absolute; inset: 0; background-color: rgb(0, 0, 0);");
+      window.addEventListener("resize", Stitch.Browser.debounce(() => { // redraw as window resized
+        svg.remove();
+        svg = pattern.draw(window.innerWidth, window.innerHeight, options);
+        svg.setAttribute("style", "margin: auto; position: absolute; inset: 0; background-color: rgb(0, 0, 0)");
+      }));
+
+      // create the download modal and add the event listener
+      let modal = Stitch.Browser.getDownloadModal(pattern, "circlePackSpiral", document.body);
+      window.addEventListener("keydown", (e) => { if (e.code === "KeyD") modal.open(); });
+
+      // create the function for stitchables output
+      function generateEmbroiderySVG(width, height) { return Stitch.Browser.serializeToString(pattern.getSvg(width, height)); }
+
+
+      function generateCirclePacking() {
+
+        let cp;
+        do {
+          cp = genCP(width, height);
+        } while (cp.getMinOverlap() < -0.1 || cp.getMinRadius() < 0.15 * Math.min(width, height) || Object.keys(cp.int).length < 1);
+        cp.resize(0, 0, width, height);
+
+        // create an array of keys
+        let cpMap = [];
+        for (let [key, c] of Object.entries(cp.pck)) cpMap.push(key);
+
+        // collect the edges
+        cp.getTriData();
+        let edges = new Set();
+        for (let t of cp.ts) {
+          for (let i = 0; i < 3; i++) {
+            let aIndex = cpMap.indexOf(t[i].toString());
+            let bIndex = cpMap.indexOf(t[(i + 1) % 3].toString());
+            let cIndex = cpMap.indexOf(t[(i + 2) % 3].toString());
+            if (t[i] < t[(i + 1) % 3]) {
+              edges.add({start: aIndex, end: bIndex});
+            }
+            if (t[i] < t[(i + 2) % 3]) {
+              edges.add({start: aIndex, end: cIndex});
+            }
+          }
+        }
+
+        // generate the graph
+        let g = new Stitch.Math.Graph();
+        for (let i = 0; i < Object.keys(cp.pck).length; i++) g.addVertex(i);
+        for (const edge of edges) {
+          if (g.edges[edge.start].findIndex((n) => n.vertex === edge.end) === -1) {
+            g.addEdge(edge.start, edge.end);
+          }
+        }
+
+        // calculate the euler tour
+        let path = g.getEulerTour();
+
+        // collect the edges from the tour
+        let pathEdges = [];
+        for (let i = 0; i < path.length - 1; i++) pathEdges.push({start: path[i], end: path[i + 1]});
+
+        // break the path up
+        let usedEdges = new Set();
+        let brokenPaths = [[]];
+        for (let i = 0; i < pathEdges.length; i++) {
+          let edge = pathEdges[i];
+          if (usedEdges.has(`${edge.start},${edge.end}`)) {
+            if (brokenPaths[brokenPaths.length - 1].length > 0) {
+              brokenPaths.push([]);
+            }
+          } else {
+            usedEdges.add(`${edge.start},${edge.end}`);
+            usedEdges.add(`${edge.end},${edge.start}`);
+            brokenPaths[brokenPaths.length - 1].push(edge);
+          }
+        }
+        brokenPaths = brokenPaths.filter(brokenPath => brokenPath.length > 0);
+
+        // calculate the min distance to neighbors
+        let adj = Array.from(Array(cpMap.length), () => new Array());
+        for (let t of cp.ts) {
+          let aIndex = cpMap.indexOf(t[0].toString());
+          let bIndex = cpMap.indexOf(t[1].toString());
+          let cIndex = cpMap.indexOf(t[2].toString());
+          if (!adj[aIndex].includes(bIndex)) adj[aIndex].push(bIndex);
+          if (!adj[aIndex].includes(cIndex)) adj[aIndex].push(cIndex);
+          if (!adj[bIndex].includes(aIndex)) adj[bIndex].push(aIndex);
+          if (!adj[bIndex].includes(cIndex)) adj[bIndex].push(cIndex);
+          if (!adj[cIndex].includes(aIndex)) adj[cIndex].push(aIndex);
+          if (!adj[cIndex].includes(bIndex)) adj[cIndex].push(bIndex);
+        }
+        for (let i = 0; i < adj.length; i++) {
+          let current = cp.pck[cpMap[i]];
+          adj[i].sort((a, b) => {
+            let aNeighbor = cp.pck[cpMap[a]];
+            let bNeighbor = cp.pck[cpMap[b]];
+            return Math.atan2(current.y - aNeighbor.y, current.x - aNeighbor.y) < Math.atan2(current.y - bNeighbor.y, current.x - bNeighbor.y) ? -1 : 1;
+          });
+        }
+
+        let paths = [];
+        for (let brokenPath of brokenPaths) {
+          let path = [];
+          for (let edge of brokenPath) {
+            let polyline = new Stitch.Math.Polyline();
+            let startCircle = cp.pck[cpMap[edge.start]];
+            let endCircle = cp.pck[cpMap[edge.end]];
+            let angleOffset = Math.atan2(startCircle.y - endCircle.y, startCircle.x - endCircle.x);
+            let startSpiral = new Spiral(new Stitch.Math.Vector(startCircle.x, startCircle.y), startCircle.r, angleOffset + Math.PI, 1, features.rotationDirection);
+            let endSpiral = new Spiral(new Stitch.Math.Vector(endCircle.x, endCircle.y), endCircle.r, angleOffset, 1, features.rotationDirection);
+            let startSpiralPoints = startSpiral.getPoints();
+            let endSpiralPoints = endSpiral.getPoints().reverse();
+            let startSpiralPolyline = new Stitch.Math.Polyline();
+            for (let k = 0; k < startSpiralPoints.length; k++) {
+              let v = new Stitch.Math.Vector(startSpiralPoints[k].x, startSpiralPoints[k].y);
+              startSpiralPolyline.addVertex(v.x, v.y);
+            }
+            let endSpiralPolyline = new Stitch.Math.Polyline();
+            for (let k = 0; k < endSpiralPoints.length; k++) {
+              let v = new Stitch.Math.Vector(endSpiralPoints[k].x, endSpiralPoints[k].y);
+              endSpiralPolyline.addVertex(v.x, v.y);
+            }
+            path.push(startSpiralPolyline);
+            path.push(endSpiralPolyline);
+          }
+          paths.push(path);
+        }
+
+        return [cp, paths];
+        
+      }
+
+</script></body></html>

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+
+	<head>
+		<script src="../stitch.js"></script>
+		<style>
+			svg {
+				margin: auto;
+				position: absolute;
+				inset: 0;
+			}
+		</style>
+	</head>
+
+	<body>
+		<script>
+
+			// work in progress - not finished yet...
+			
+			// const graph = new Stitch.Math.Graph();
+			// graph.addVertex("A");
+			// graph.addVertex("B");
+			// graph.addVertex("C");
+			// graph.addVertex("D");
+
+			// graph.addEdge("A", "B", 10);
+			// graph.addEdge("A", "C", 15);
+			// graph.addEdge("A", "D", 20);
+			// graph.addEdge("B", "C", 35);
+			// graph.addEdge("B", "D", 25);
+			// graph.addEdge("C", "D", 30);
+
+			// const result = graph.tsp("A");
+			// console.log("Shortest Path:", result.path);
+			// console.log("Shortest Distance:", result.distance);
+			// console.log(Object.keys(graph.edges["A"]));
+
+			// create a new pattern and add the thread
+			let pattern = new Stitch.Pattern(400, 400);
+			let thread = pattern.addThread(0, 0, 0);
+
+			// define the x/y coordinates of the points and create the polyline
+			let polyline = Stitch.Math.Polyline.fromArrays([
+				[102, 356], [ 24, 251], [ 32, 179], [ 84, 250], [ 58, 145], [ 80, 108], [127,  46], [127, 102], [102, 140],
+				[116, 164], [135, 188], [171, 151], [193, 106], [201,  73], [233,  57], [232,  86], [225, 112], [240, 116],
+				[256,  94], [279,  73], [320,  85], [329, 118], [354, 173], [362, 228], [356, 266], [312, 211], [269, 190],
+				[247, 206], [227, 240], [228, 262], [243, 255], [246, 233], [256, 218], [282, 219], [312, 246], [323, 268],
+				[331, 301], [319, 325], [290, 356], [248, 362], [216, 357], [205, 337], [199, 293], [189, 246], [172, 235],
+				[152, 245], [139, 261], [138, 283], [146, 277], [159, 257], [174, 256], [174, 274], [177, 302], [177, 336],
+				[158, 358], [121, 366]
+			], true);
+
+			// create the complex fill and add it to the thread
+			// thread.addRun(new Stitch.Runs.Run(1, polyline.getRounded(10)));
+			thread.addRun(new Stitch.Runs.ComplexFill(1, 1, 0, polyline.getRounded(10)));
+
+			// draw the pattern
+			let options = { showStitches: false };
+			let svg = pattern.draw(window.innerWidth, window.innerHeight, options);
+			window.addEventListener("resize", Stitch.Browser.debounce(() => { // redraw as window resized
+				svg.remove(); svg = pattern.draw(window.innerWidth, window.innerHeight, options);
+			}));
+
+			// create the download modal and add the event listener
+			let modal = Stitch.Browser.getDownloadModal(pattern, "businessCard", document.body);
+			window.addEventListener("keydown", (e) => { if (e.code === "KeyD") modal.open(); });
+
+			// create the function for stitchables output
+			function generateEmbroiderySVG(width, height) { return Stitch.Browser.serializeToString(pattern.getSvg(width, height)); }
+
+		</script>
+	</body>
+
+</html>
