@@ -33,11 +33,12 @@
 			let thread = pattern.addThread(0, 0, 0);
 
 			// create the CSG shapes
+			let padding = 5;
 			let csgShapes = [];
 			for (let i = 0; i < 10; i++) {
 				let r = Stitch.Math.Utils.map(R.random_dec(), 0, 1, 50, 100);
-				let cx = Stitch.Math.Utils.map(R.random_dec(), 0, 1, r, pattern.width - r);
-				let cy = Stitch.Math.Utils.map(R.random_dec(), 0, 1, r, pattern.height - r);
+				let cx = Stitch.Math.Utils.map(R.random_dec(), 0, 1, r + padding, pattern.width - r - padding);
+				let cy = Stitch.Math.Utils.map(R.random_dec(), 0, 1, r + padding, pattern.height - r - padding);
 				let polyline = new Stitch.Math.Polyline(true);
 				for (let a = 0; a < 2 * Math.PI; a += 0.1) polyline.addVertex(r * Math.cos(a) + cx, r * Math.sin(a) + cy);
 				csgShapes.push(Stitch.CSG.Shape.fromPolylines([polyline]));
@@ -49,7 +50,7 @@
 			let polylines = shape.toPolylines();
 
 			// create the runs and add them to the thread
-			for (let polyline of polylines) thread.addRun(new Stitch.Runs.Run(1, polyline));
+			for (let polyline of polylines) thread.addRun(new Stitch.Runs.Satin(5, 0.25, polyline));
 
 			// draw the pattern
 			let options = { showStitches: false };
