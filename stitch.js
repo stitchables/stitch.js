@@ -9,6 +9,7 @@ Stitch.Pattern = class {
       units: 'px',
       pixelMultiplier: 3.78, // 3.78 seems a bit arbitrary but ¯\_(ツ)_/¯ - https://stackoverflow.com/questions/35359334/svg-mm-and-px-co-ordinates-lengths-differ-for-defined-viewbox
       strokeWidth: 1,
+      justify: false,
       parentElement: document.body,
       showStitches: false,
       sigFigs: 5,
@@ -23,7 +24,13 @@ Stitch.Pattern = class {
   getStitches(width, height, pixelMultiplier = 3.78) {
     let dimensions = width / height > this.width / this.height ? { width: (this.width / this.height) * height, height: height } : { width: width, height: (this.height / this.width) * width };
     let pixelsPerUnit = pixelMultiplier * this.width / dimensions.width;
-    let stitches = { dimensions: dimensions, pixelsPerUnit: pixelsPerUnit, stitchCount: 0, threads: [] };
+    let stitches = {
+      dimensions: dimensions,
+      pixelsPerUnit: pixelsPerUnit,
+      boundingBox: { min: new Stitch.Math.Vector(Infinity, Infinity), max: new Stitch.Math.Vector(-Infinity, -Infinity) },
+      stitchCount: 0,
+      threads: []
+    };
     for (let t of this.threads) {
       let thread = { thread: t, runs: [] };
       for (let r of t.runs) {
@@ -31,6 +38,10 @@ Stitch.Pattern = class {
         for (let stitch of r.getStitches(pixelsPerUnit)) {
           run.push(new Stitch.Math.Vector(stitch.x, stitch.y));
           stitches.stitchCount++;
+          if (stitch.x < stitches.boundingBox.min.x) stitches.boundingBox.min.x = stitch.x;
+          if (stitch.y < stitches.boundingBox.min.y) stitches.boundingBox.min.y = stitch.y;
+          if (stitch.x > stitches.boundingBox.max.x) stitches.boundingBox.max.x = stitch.x;
+          if (stitch.y > stitches.boundingBox.max.y) stitches.boundingBox.max.y = stitch.y;
         }
         thread.runs.push(run);
       }
@@ -52,6 +63,11 @@ Stitch.Pattern = class {
     for (let t of stitches.threads) {
       let group = document.createElementNS(options.namespace, "g");
       group.setAttribute("style", `fill: none; stroke-width: ${options.strokeWidth}; stroke: rgb(${t.thread.red}, ${t.thread.green}, ${t.thread.blue});`);
+      if (options.justify) {
+        let xTranslate = Number((-1 * stitches.boundingBox.min.x).toPrecision(options.sigFigs));
+        let yTranslate = Number((-1 * stitches.boundingBox.min.y).toPrecision(options.sigFigs));
+        group.setAttribute("transform", `translate(${xTranslate} ${yTranslate})`);
+      }
       svg.appendChild(group);
       for (let r of t.runs) {
         let d = "";

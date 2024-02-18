@@ -435,8 +435,7 @@
       window.addEventListener("keydown", (e) => { if (e.code === "KeyD") modal.open(); });
 
       // create the function for stitchables output
-      function generateEmbroiderySVG(width, height) { return Stitch.Browser.serializeToString(pattern.getSvg(width, height)); }
-
+      function generateEmbroiderySVG(width, height) { return Stitch.Browser.serializeToString(pattern.getSvg(width, height, { pixelMultiplier: 1, units: 'mm', justify: true })); }
 
       function generateCirclePacking() {
 
