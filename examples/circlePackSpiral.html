@@ -424,6 +424,7 @@
       let options = { showStitches: false, pixelMultiplier: 2, strokeWidth: 2 };
       let svg = pattern.draw(window.innerWidth, window.innerHeight, options);
       svg.setAttribute("style", "margin: auto; position: absolute; inset: 0; background-color: rgb(0, 0, 0);");
+      Stitch.Browser.animateSvgElements(svg.querySelectorAll('path'), 20);
       window.addEventListener("resize", Stitch.Browser.debounce(() => { // redraw as window resized
         svg.remove();
         svg = pattern.draw(window.innerWidth, window.innerHeight, options);

@@ -16,24 +16,6 @@
 		<script>
 
 			// work in progress - not finished yet...
-			
-			// const graph = new Stitch.Math.Graph();
-			// graph.addVertex("A");
-			// graph.addVertex("B");
-			// graph.addVertex("C");
-			// graph.addVertex("D");
-
-			// graph.addEdge("A", "B", 10);
-			// graph.addEdge("A", "C", 15);
-			// graph.addEdge("A", "D", 20);
-			// graph.addEdge("B", "C", 35);
-			// graph.addEdge("B", "D", 25);
-			// graph.addEdge("C", "D", 30);
-
-			// const result = graph.tsp("A");
-			// console.log("Shortest Path:", result.path);
-			// console.log("Shortest Distance:", result.distance);
-			// console.log(Object.keys(graph.edges["A"]));
 
 			// create a new pattern and add the thread
 			let pattern = new Stitch.Pattern(400, 400);
@@ -52,11 +34,17 @@
 
 			// create the complex fill and add it to the thread
 			// thread.addRun(new Stitch.Runs.Run(1, polyline.getRounded(10)));
-			thread.addRun(new Stitch.Runs.ComplexFill(1, 1, 0, polyline.getRounded(10)));
+			let rounded = polyline.getRounded(10);
+			let random = new Stitch.Math.Random();
+			thread.addRun(new Stitch.Runs.ComplexFill(2, 0.15, random.random_num(0, Math.PI), rounded));
 
 			// draw the pattern
-			let options = { showStitches: false };
+			let options = { showStitches: false, animate: true, strokeWidth: 1 };
 			let svg = pattern.draw(window.innerWidth, window.innerHeight, options);
+
+			// animate the embroidery
+			Stitch.Browser.animateSvgElements(svg.querySelectorAll('path'), 10);
+
 			window.addEventListener("resize", Stitch.Browser.debounce(() => { // redraw as window resized
 				svg.remove(); svg = pattern.draw(window.innerWidth, window.innerHeight, options);
 			}));
