@@ -30,20 +30,28 @@
 				[331, 301], [319, 325], [290, 356], [248, 362], [216, 357], [205, 337], [199, 293], [189, 246], [172, 235],
 				[152, 245], [139, 261], [138, 283], [146, 277], [159, 257], [174, 256], [174, 274], [177, 302], [177, 336],
 				[158, 358], [121, 366]
-			], true);
+			], true).getRounded(10);
 
+			let contours = [
+				Stitch.Math.Polyline.fromArrays([[142, 324], [142, 296], [121, 297], [108, 315], [125, 338]], true).getRounded(10),
+				Stitch.Math.Polyline.fromArrays([[206, 139], [194, 150], [203, 166], [217, 146]], true).getRounded(10),
+				Stitch.Math.Polyline.fromArrays([[234, 309], [234, 326], [260, 326], [286, 295], [286, 264], [254, 279]], true).getRounded(10)
+			];
+
+			// let offsetPolyline = polyline.getOffset(-10)
 			// create the complex fill and add it to the thread
-			// thread.addRun(new Stitch.Runs.Run(1, polyline.getRounded(10)));
-			let rounded = polyline.getRounded(10);
 			let random = new Stitch.Math.Random();
-			thread.addRun(new Stitch.Runs.ComplexFill(2, 0.15, random.random_num(0, Math.PI), rounded));
+			let angle = random.random_num(0, Math.PI);
+			angle = 0;
+			thread.addRun(new Stitch.Runs.ComplexFill(1, 1, angle + 0.5 * Math.PI, polyline.getOffset(-5), contours.map(c => c.getOffset(-5))));
+			thread.addRun(new Stitch.Runs.ComplexFill(2, 0.2, angle, polyline, contours));
 
 			// draw the pattern
 			let options = { showStitches: false, animate: true, strokeWidth: 1 };
 			let svg = pattern.draw(window.innerWidth, window.innerHeight, options);
 
 			// animate the embroidery
-			Stitch.Browser.animateSvgElements(svg.querySelectorAll('path'), 10);
+			Stitch.Browser.animateSvgElements(svg.querySelectorAll('path'), 50);
 
 			window.addEventListener("resize", Stitch.Browser.debounce(() => { // redraw as window resized
 				svg.remove(); svg = pattern.draw(window.innerWidth, window.innerHeight, options);

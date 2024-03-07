@@ -153,6 +153,8 @@ Stitch.Math = {
   Vector: class {
     constructor(x, y) { [this.x, this.y] = [x, y]; }
     static fromAngle(angle) { return new Stitch.Math.Vector(Math.cos(angle), Math.sin(angle)); }
+    static min(v1, v2) { return new Stitch.Math.Vector(Math.min(v1.x, v2.x), Math.min(v1.y, v2.y)); }
+    static max(v1, v2) { return new Stitch.Math.Vector(Math.max(v1.x, v2.x), Math.max(v1.y, v2.y)); }
     copy() { return new Stitch.Math.Vector(this.x, this.y); }
     add(v) { return new Stitch.Math.Vector(this.x + v.x, this.y + v.y); }
     subtract(v) { return new Stitch.Math.Vector(this.x - v.x, this.y - v.y); }
@@ -184,7 +186,7 @@ Stitch.Math = {
       for (let array of arrays) polyline.addVertex(array[0], array[1]);
       return polyline;
     }
-    static fromObjects(objects, isCLosed = false) {
+    static fromObjects(objects, isClosed = false) {
       let polyline = new Stitch.Math.Polyline(isClosed);
       for (let object of objects) polyline.addVertex(object.x, object.y);
       return polyline;
@@ -351,14 +353,6 @@ Stitch.Math = {
       boundingBox.center = boundingBox.min.add(new Stitch.Math.Vector(0.5 * boundingBox.width, 0.5 * boundingBox.height));
       return boundingBox;
     }
-    // getCentroid() {
-    //   let centroid = this.vertices[0];
-    //   for (let i = 1; i < this.vertices.length; i++) {
-    //     centroid = centroid.add(this.vertices[i]);
-    //   }
-    //   centroid = centroid.multiply(1 / this.vertices.length);
-    //   return centroid;
-    // }
     getArea() {
       let area = 0;
       for (let i = 0; i < this.vertices.length; i++) {
@@ -366,7 +360,7 @@ Stitch.Math = {
         let next = this.vertices[(i + 1) % this.vertices.length];
         area += curr.x * next.y - next.x * curr.y;
       }
-      return 0.5 * area;
+      return 0.5 * Math.abs(area);
     }
     getCentroid() {
       let centroid = new Stitch.Math.Vector(0, 0);
@@ -377,6 +371,17 @@ Stitch.Math = {
         centroid.y += (curr.y + next.y) * (curr.x * next.y - next.x * curr.y);
       }
       return centroid.multiply(1 / 6 / this.getArea());
+    }
+    containsPoint(point) {
+      let contains = false;
+      for (let i = 0, j = this.vertices.length - 1; i < this.vertices.length; j = i++) {
+        if (
+          (this.vertices[i].y > point.y) !== (this.vertices[j].y > point.y) &&
+          (point.x < (this.vertices[j].x - this.vertices[i].x) * (point.y - this.vertices[i].y) / (this.vertices[j].y - this.vertices[i].y) + this.vertices[i].x)) {
+          contains = !contains;
+        }
+      }
+      return contains;
     }
   },
 
@@ -664,7 +669,7 @@ Stitch.CSG = {
       return shape;
     }
     clone() { return new Stitch.CSG.Shape(this.segments.map(function(p) { return p.clone(); })); }
-    toPolylines(epsilon = 1) {
+    toPolylines(epsilon = 0.1) {
       var polylines = [];
       var list = this.segments.slice();
       var findNext = function(extremum) {
@@ -698,7 +703,42 @@ Stitch.CSG = {
           currentIndex++;
         }
       }
-      return polylines;
+
+      // determine the parent/child structure
+      let nestedPolylines = [];
+      for (let i = 0; i < polylines.length; i++) nestedPolylines.push({ polyline: polylines[i], area: polylines[i].getArea(), parent: null, children: [] });
+      nestedPolylines.sort((a, b) => { return a.area > b.area ? 1 : -1; });
+      for (let i = 0; i < nestedPolylines.length; i++) {
+        let minParentArea = Infinity;
+        let minParent = null;
+        for (let j = i + 1; j < nestedPolylines.length; j++) {
+          if (nestedPolylines[j].polyline.containsPoint(nestedPolylines[i].polyline.vertices[0])) {
+            if (nestedPolylines[j].area < minParentArea) {
+              minParentArea = nestedPolylines[j].area;
+              minParent = nestedPolylines[j];
+              nestedPolylines[i].parent = nestedPolylines[j];
+            }
+          }
+        }
+        if (minParent !== null) minParent.children.push(nestedPolylines[i]);
+      }
+      let structuredPolylines = [];
+      while (nestedPolylines.length > 0) {
+        let shapes = nestedPolylines.filter(x => x.parent === null);
+        for (let shape of shapes) {
+          structuredPolylines.push({ polyline: shape.polyline, contours: shape.children.map(x => x.polyline) });
+          nestedPolylines = nestedPolylines.filter(x => x !== shape && x.parent !== shape);
+          for (let nestedPolyline of nestedPolylines) {
+            for (let child of shape.children) {
+              if (nestedPolyline.parent === child) {
+                nestedPolyline.parent = null;
+              }
+            }
+          }
+        }
+      }
+
+      return structuredPolylines;
     }
     union(shape) {
       var a = new Stitch.CSG.Node(this.clone().segments);
@@ -1282,7 +1322,7 @@ Stitch.Browser = {
     Stitch.Browser.setStyles(dimensionsTitle, { fontSize: '16px', fontWeight: 'bold', gridArea: '4 / 1 / 4 / 3' });
     grid.appendChild(dimensionsTitle);
     let dimensionsSlider = document.createElement('input');
-    Stitch.Browser.setAttributes(dimensionsSlider, { type: 'range', min: 1, max: 1000, value: 50 });
+    Stitch.Browser.setAttributes(dimensionsSlider, { type: 'range', min: 1, max: 250, value: 50 });
     Stitch.Browser.setStyles(dimensionsSlider, { width: '80%', gridArea: '5 / 1 / 5 / 3' });
     calculateDimensions();
     dimensionsSlider.addEventListener('input', () => {
@@ -1387,13 +1427,15 @@ Stitch.Runs = {
 
   // work in progress - not finished yet...
   ComplexFill: class {
-    constructor(stitchLength, density, angle, polyline) {
+    constructor(stitchLength, density, angle, polyline, contours = []) {
       this.stitchLength = stitchLength;
       this.density = density;
       this.angle = angle;
       this.polyline = polyline;
+      this.contours = contours;
       this.boundingBox = this.polyline.getBoundingBox();
       [this.splitShapes, this.tour] = this.splitPolygon();
+      this.filledPolylines = [];
     }
     createConnectedPolygon(polylines, maxCheckDist) {
       let connectedPolygon = [];
@@ -1444,7 +1486,7 @@ Stitch.Runs = {
 
       let maxCheckDist = this.boundingBox.center.distance(this.boundingBox.max);
 
-      let [connectedPolygon, extremeEdges] = this.createConnectedPolygon([this.polyline], maxCheckDist);
+      let [connectedPolygon, extremeEdges] = this.createConnectedPolygon([this.polyline, ...this.contours], maxCheckDist);
 
       // add the splits to the connected polygon
       for (let extremeEdge of extremeEdges) {
@@ -1514,6 +1556,58 @@ Stitch.Runs = {
         }
 
       }
+
+      // need to fake stuff incase it is a simple shape
+      if (extremeEdges.length === 0) {
+        connectedPolygon[0].isExtreme = true;
+        connectedPolygon[0].fromToPairs.push(connectedPolygon[0].fromToPairs[0]);
+        extremeEdges.push(connectedPolygon[0]);
+      }
+
+      // console.log(extremeEdges[0]);
+      //   let collectedPolygons = [];
+      //   let extremeEdge = extremeEdges[0];
+      //   for (let i = 1; i < extremeEdge.fromToPairs.length; i++) {
+      //     let collectedPolygon = [extremeEdge];
+      //     let polyline = new Stitch.Math.Polyline(true);
+      //     polyline.addVertex(extremeEdge.position.x, extremeEdge.position.y);
+      //     let polygonExtremeEdges = [];
+      //     let [prevEdge, currEdge, nextEdge] = [extremeEdge.fromToPairs[i].from, extremeEdge, extremeEdge.fromToPairs[i].to];
+      //     let [topExtremeFound, bottomExtremeFound] = [false, false];
+      //     do {
+
+      //       // decide if extreme edge is top or bottom of shape
+      //       if (currEdge.isExtreme) {
+      //         let vPos = currEdge.position.add(Stitch.Math.Vector.fromAngle(this.angle));
+      //         let vNeg = currEdge.position.subtract(Stitch.Math.Vector.fromAngle(this.angle));
+      //         if (Stitch.Math.Utils.isPointLeft(vPos, vNeg, prevEdge.position)) {
+      //           polygonExtremeEdges.push({ edge: currEdge, isTop: true });
+      //         } else {
+      //           polygonExtremeEdges.push({ edge: currEdge, isTop: false });
+      //         }
+      //       }
+
+      //       prevEdge = currEdge;
+      //       currEdge = nextEdge;
+      //       nextEdge = currEdge.fromToPairs[0].to;
+      //       if (currEdge.fromToPairs.length > 0) {
+      //         let possibleNextEdges = currEdge.fromToPairs.slice(1).filter(e => e.from !== prevEdge);
+      //         console.log(possibleNextEdges);
+      //         for (let j = 1; j < currEdge.fromToPairs.length; j++) {
+      //           if (currEdge.fromToPairs[j].from === prevEdge) {
+      //             nextEdge = currEdge.fromToPairs[j].to;
+      //             currEdge.fromToPairs.splice(j, 1);
+      //             break;
+      //           }
+      //         }
+      //       }
+      //       collectedPolygon.push(currEdge);
+      //       polyline.addVertex(currEdge.position.x, currEdge.position.y);
+
+      //     } while (nextEdge !== extremeEdge);
+      //     collectedPolygons.push({ edges: collectedPolygon, polyline, centroid: polyline.getCentroid(), extremeEdges: polygonExtremeEdges });
+      //   }
+      //   console.log(collectedPolygons);
 
       // collect the polygons
       let collectedPolygons = [];
@@ -1622,7 +1716,7 @@ Stitch.Runs = {
       }
       let fillLines = [];
       for (let shape of this.splitShapes) {
-        let temp = { shape: shape.edges, fillLines: [] };
+        let temp = { shape: shape.edges, polyline: shape.polyline, fillLines: [] };
         for (let i = 0; i < lines.length; i++) {
           let line = lines[i];
           let intersections = [];
@@ -1641,47 +1735,56 @@ Stitch.Runs = {
       }
       return fillLines;
     }
-    doesShapeContainPoint(point) {
-      let contains = false;
-      for (let i = 0, j = this.polyline.vertices.length - 1; i < this.polyline.vertices.length; j = i++) {
-        if (
-          (this.polyline.vertices[i].y > point.y) !== (this.polyline.vertices[j].y > point.y) &&
-          (point.x < (this.polyline.vertices[j].x - this.polyline.vertices[i].x) * (point.y - this.polyline.vertices[i].y) / (this.polyline.vertices[j].y - this.polyline.vertices[i].y) + this.polyline.vertices[i].x)) {
-          contains = !contains;
-        }
-      }
-      return contains;
-    }
-    findPath(from, to, stepSize = 5) {
+    findPath(from, to, maxStepSize = 10, minStepSize = 1) {
       let queue = [[from]];
       let visited = new Set();
       while (queue.length > 0) {
         let path = queue.shift();
         let current = path[path.length - 1];
-        if (current.distance(to) < 2 * stepSize) return path;
+        if (current.distance(to) < 2 * maxStepSize) return path;
         if (!visited.has(current.x + ',' + current.y)) {
           visited.add(current.x + ',' + current.y);
           let neighbors = [
-            new Stitch.Math.Vector(current.x + stepSize, current.y),
-            new Stitch.Math.Vector(current.x - stepSize, current.y),
-            new Stitch.Math.Vector(current.x, current.y + stepSize),
-            new Stitch.Math.Vector(current.x, current.y - stepSize),
-            new Stitch.Math.Vector(current.x + stepSize, current.y + stepSize),
-            new Stitch.Math.Vector(current.x - stepSize, current.y - stepSize),
-            new Stitch.Math.Vector(current.x + stepSize, current.y - stepSize),
-            new Stitch.Math.Vector(current.x - stepSize, current.y + stepSize)
+            new Stitch.Math.Vector(current.x + maxStepSize, current.y),
+            new Stitch.Math.Vector(current.x - maxStepSize, current.y),
+            new Stitch.Math.Vector(current.x, current.y + maxStepSize),
+            new Stitch.Math.Vector(current.x, current.y - maxStepSize),
+            new Stitch.Math.Vector(current.x + maxStepSize, current.y + maxStepSize),
+            new Stitch.Math.Vector(current.x - maxStepSize, current.y - maxStepSize),
+            new Stitch.Math.Vector(current.x + maxStepSize, current.y - maxStepSize),
+            new Stitch.Math.Vector(current.x - maxStepSize, current.y + maxStepSize)
           ];
           for (const neighbor of neighbors) {
-            if (this.doesShapeContainPoint(neighbor)) {
-              let newPath = [...path, neighbor];
-              queue.push(newPath);
+            if (this.polyline.containsPoint(neighbor)) {
+              let checkContours = true;
+              for (let contour of this.contours) {
+                if (contour.containsPoint(neighbor)) {
+                  checkContours = false;
+                  break;
+                }
+              }
+              let checkFilled = true;
+              for (let i = 0; i < this.filledPolylines.length; i++) {
+                let polyline = this.filledPolylines[i];
+                if (polyline.containsPoint(neighbor)) {
+                  checkFilled = false;
+                  break;
+                }
+              }
+              if (checkContours && checkFilled) {
+                let newPath = [...path, neighbor];
+                queue.push(newPath);
+              }
             }
           }
         }
       }
+      if (maxStepSize > minStepSize) return this.findPath(from, to, 0.5 * maxStepSize, minStepSize);
+      console.log("no path found");
       return [];
     }
     getStitches(pixelsPerUnit) {
+      this.filledPolylines = [];
       let stitches = [];
       let fillLines = this.getFillLines(pixelsPerUnit);
       for (let i = 0; i < this.tour.length; i++) {
@@ -1706,10 +1809,41 @@ Stitch.Runs = {
             if (line.index % 2 === 1) rowStitches.reverse();
             fill = fill.concat(rowStitches);
           }
-          if (i > 0) stitches = stitches.concat(this.findPath(stitches[stitches.length - 1], fill[0]));
+          if (i > 0 && stitches.length > 0 && fill.length > 0) {
+            // let closestVertex = new Stitch.Math.Vector(Infinity, Infinity);
+            // for (let j = i; j < this.tour.length; j++) {
+            //   if (this.tour[j].isFilled) {
+            //     let vertex = fillLines[this.tour[j].vertex].polyline.getClosestVertex(stitches[stitches.length - 1]);
+            //     if (vertex.distance(stitches[stitches.length - 1]) < closestVertex.distance(stitches[stitches.length - 1])) {
+            //       closestVertex = vertex;
+            //     }
+            //   }
+            // }
+            // let path = this.findPath(closestVertex, fill[0]);
+
+            let path = this.findPath(stitches[stitches.length - 1], fill[0]);
+            stitches = stitches.concat(Stitch.Math.Polyline.fromObjects(path, false).getResampledBySpacing(this.stitchLength * pixelsPerUnit).vertices);
+          }
           stitches = stitches.concat(fill);
+          // this.filledPolylines.push(fillLines[this.tour[i].vertex].polyline);
         }
       }
+
+      // let stitches = [];
+
+      // stitches = stitches.concat(this.splitShapes[1].polyline.getResampledBySpacing(pixelsPerUnit).vertices);
+      // for (let shape of this.splitShapes) stitches = stitches.concat(shape.polyline.getResampledBySpacing(pixelsPerUnit).vertices);
+
+      // let fillLines = this.getFillLines(pixelsPerUnit);
+      // // for (let shape of fillLines) {
+      //   let shape = fillLines[1];
+      //   stitches = stitches.concat(shape.polyline.getResampledBySpacing(pixelsPerUnit).vertices);
+      //   for (let line of shape.fillLines) {
+      //     if (line.index % 2 === 0) stitches = stitches.concat([line.intersectionStart, line.intersectionEnd]);
+      //     else stitches = stitches.concat([line.intersectionEnd, line.intersectionStart]);
+      //   }
+      // // }
+
       return stitches;
     }
   }
