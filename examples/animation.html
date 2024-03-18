@@ -3,7 +3,8 @@
 
 	<head>
 		<script src="../stitch.js"></script>
-		<script src="https://numbersinmotion.github.io/ln.js/ln.js"></script>
+		<!-- <script src="https://numbersinmotion.github.io/ln.js/ln.js"></script> -->
+		<script src="/Users/mattjacobson/Documents/ln.js/ln.js"></script>
 		<style>
 			svg {
 				margin: auto;
@@ -55,7 +56,7 @@
 						}
 					} else {
 						for (let r = 0.1; r < 10; r += 0.15) {
-							let path = new ln.Path();
+							let path = new ln.Path(true);
 							for (let a = 0; a <= 360; a += 5) {
 								let radius = r + 0.15 * this.pct;
 								let angle = ln.Utils.degToRad(a);
@@ -71,6 +72,39 @@
 					return paths;
 				}
 			};
+
+
+			class TripleRope {
+				constructor(polyline, stitchLength = 3, ropeWidth = 3) {
+					[this.polyline, this.stitchLength, this.ropeWidth] = [polyline, stitchLength, ropeWidth];
+				}
+				getStitches(pixelsPerUnit) {
+					let resampled = this.polyline.getResampledBySpacing(pixelsPerUnit * this.stitchLength).vertices;
+					if (this.polyline.isClosed) resampled.push(resampled[0]);
+					let [middleRope, leftRope, rightRope] = [[], [], [], []];
+					for (let i = 0, stitchCount = 0; i < resampled.length; i++) {
+						if (i === 0 || i === resampled.length - 1) {
+							middleRope.push(resampled[i]);
+							leftRope.push(resampled[i]);
+							rightRope.push(resampled[i]);
+						} else {
+							let [prev, curr, next] = [resampled[i - 1], resampled[i], resampled[i + 1]];
+							let [dPrev, dNext] = [curr.subtract(prev), next.subtract(curr)];
+							if (dPrev.squaredLength() > 0.001 && dNext.squaredLength() > 0.001) {
+								let [nPrev, nNext] = [dPrev.normalized(), dNext.normalized()];
+								let normal = nPrev.add(nNext).divide(2);
+								if (normal.squaredLength() < 0.001) normal = nPrev.rotate(0.5 * Math.PI).multiply(pixelsPerUnit * this.ropeWidth);
+								else normal = normal.rotate(0.5 * Math.PI).multiply(pixelsPerUnit * this.ropeWidth);
+								middleRope.push(resampled[i]);
+								leftRope.push(stitchCount % 2 === 0 ? resampled[i].add(normal) : resampled[i].subtract(normal));
+								rightRope.push(stitchCount % 2 === 1 ? resampled[i].add(normal) : resampled[i].subtract(normal));
+								stitchCount++;
+							}
+						}
+					}
+					return [...middleRope, ...leftRope.reverse(), ...rightRope, ...middleRope.slice().reverse()];
+				}
+			}
 
 
 			// ********** ln.js stuff ********** //
@@ -100,28 +134,32 @@
 			let totalFrameCount = 10;
 			for (let i = 0; i < totalFrameCount; i++) {
 				[redShape.pct, blueShape.pct] = [i / totalFrameCount, i / totalFrameCount];
-				let redPaths = redScene.Render(eye, center, up, width, height, fovy, znear, zfar, step);
-				let bluePaths = blueScene.Render(eye, center, up, width, height, fovy, znear, zfar, step);
+				let redPaths = redScene.render(eye, center, up, width, height, fovy, znear, zfar, step);
+				let bluePaths = blueScene.render(eye, center, up, width, height, fovy, znear, zfar, step);
 				pathsForFrames.push({ frameCount: i, redPaths, bluePaths });
 			}
 
 			// generate the embroidery patterns for each frame
+			let [stitchLength, ropeWidth] = [3, 0.25];
 			let patternForFrames = []
 			for (let pathsForFrame of pathsForFrames) {
 				let pattern = new Stitch.Pattern(width, height);
-				let blackThread = pattern.addThread(0, 0, 0)
-				let redThread = pattern.addThread(255, 0, 0);
+				let blackThread = pattern.addThread(0, 0, 0);
 				let blueThread = pattern.addThread(0, 0, 255);
-				blackThread.addRun(new Stitch.Runs.Run(1, Stitch.Math.Polyline.fromArrays([[0, 0], [width, 0], [width, height], [0, height]], true)));
-				for (let redPath of pathsForFrame.redPaths.paths) {
-					let redPolyline = new Stitch.Math.Polyline(false);
-					for (let point of redPath.points) redPolyline.addVertex(point.X, height - point.Y);
-					redThread.addRun(new Stitch.Runs.Run(1, redPolyline));
-				}
+				let redThread = pattern.addThread(255, 0, 0);
+				blackThread.addRun(new TripleRope(Stitch.Math.Polyline.fromArrays([[ropeWidth, ropeWidth], [width - ropeWidth, ropeWidth]]), stitchLength, ropeWidth));
+				blackThread.addRun(new TripleRope(Stitch.Math.Polyline.fromArrays([[width - ropeWidth, ropeWidth], [width - ropeWidth, height - ropeWidth]]), stitchLength, ropeWidth));
+				blackThread.addRun(new TripleRope(Stitch.Math.Polyline.fromArrays([[width - ropeWidth, height - ropeWidth], [ropeWidth, height - ropeWidth]]), stitchLength, ropeWidth));
+				blackThread.addRun(new TripleRope(Stitch.Math.Polyline.fromArrays([[ropeWidth, height - ropeWidth], [ropeWidth, ropeWidth]]), stitchLength, ropeWidth));
 				for (let bluePath of pathsForFrame.bluePaths.paths) {
 					let bluePolyline = new Stitch.Math.Polyline(false);
 					for (let point of bluePath.points) bluePolyline.addVertex(point.X, height - point.Y);
-					blueThread.addRun(new Stitch.Runs.Run(1, bluePolyline));
+					blueThread.addRun(new TripleRope(bluePolyline, stitchLength, ropeWidth));
+				}
+				for (let redPath of pathsForFrame.redPaths.paths) {
+					let redPolyline = new Stitch.Math.Polyline(false);
+					for (let point of redPath.points) redPolyline.addVertex(point.X, height - point.Y);
+					redThread.addRun(new TripleRope(redPolyline, stitchLength, ropeWidth));
 				}
 				patternForFrames.push({ frameCount: pathsForFrame.frameCount, pattern });
 			}

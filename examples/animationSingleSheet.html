@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html>
+
+	<head>
+		<script src="../stitch.js"></script>
+		<!-- <script src="https://numbersinmotion.github.io/ln.js/ln.js"></script> -->
+		<script src="/Users/mattjacobson/Documents/ln.js/ln.js"></script>
+		<style>
+			svg {
+				margin: auto;
+				position: absolute;
+				inset: 0;
+			}
+		</style>
+	</head>
+
+	<body>
+		<script>
+
+
+			class CustomShapeFunction {
+				constructor(func, box, direction, pct, isSwitch) { [this.Func, this.Box, this.Direction, this.pct, this.isSwitch] = [func, box, direction, pct, isSwitch]; }
+				static Below() { return "Below"; }
+				static Above() { return "Above"; }
+				Compile() { return null; }
+				BoundingBox() { return this.Box; }
+				Contains(v) {
+					if (this.Direction === "Below") return v.Z < this.Func(v.X, v.Y);
+					else return v.Z > this.Func(v.X, v.Y);
+				}
+				Intersect(ray) {
+					let step = 1 / 64;
+					let sign = this.Contains(ray.Position(step));
+					for (let t = step; t < 10; t += step) {
+						let v = ray.Position(t);
+						if (this.Contains(v) !== sign && this.Box.Contains(v)) return new ln.Hit(this, t);
+					}
+					return ln.Hit.none();
+				}
+				Paths() {
+					let paths = new ln.Paths();
+					let fine = 1 / 256;
+					if (this.isSwitch) {
+						for (let a = 0; a < 360; a += 15) {
+							let path = new ln.Path();
+							for (let r = 0; r <= 8; r += fine) {
+								let radius = r;
+								let angle = ln.Utils.degToRad(a + 15 * this.pct);
+								let [x, y] = [radius * Math.cos(angle), radius * Math.sin(angle)];
+								let z = this.Func(x, y);
+								z = Math.min(z, this.Box.Max.Z);
+								z = Math.max(z, this.Box.Min.Z);
+								path.Add(new ln.Vector(x, y, z));
+							}
+							paths.Add(path);
+						}
+					} else {
+						for (let r = 0.1; r < 10; r += 0.55) {
+							let path = new ln.Path(true);
+							for (let a = 0; a <= 360; a += 5) {
+								let radius = r + 0.55 * this.pct;
+								let angle = ln.Utils.degToRad(a);
+								let [x, y] = [radius * Math.cos(angle), radius * Math.sin(angle)];
+								let z = this.Func(x, y);
+								z = Math.min(z, this.Box.Max.Z);
+								z = Math.max(z, this.Box.Min.Z);
+								path.Add(new ln.Vector(x, y, z));
+							}
+							paths.Add(path);
+						}
+					}
+					return paths;
+				}
+			};
+
+
+			class DoubleRope {
+				constructor(polyline, stitchLength = 3, ropeWidth = 3) {
+					[this.polyline, this.stitchLength, this.ropeWidth] = [polyline, stitchLength, ropeWidth];
+				}
+				getStitches(pixelsPerUnit) {
+					let resampled = this.polyline.getResampledBySpacing(pixelsPerUnit * this.stitchLength).vertices;
+					if (this.polyline.isClosed) resampled.push(resampled[0]);
+					let [middleRope, leftRope, rightRope] = [[], [], [], []];
+					for (let i = 0, stitchCount = 0; i < resampled.length; i++) {
+						if (i === 0 || i === resampled.length - 1) {
+							middleRope.push(resampled[i]);
+							leftRope.push(resampled[i]);
+							rightRope.push(resampled[i]);
+						} else {
+							let [prev, curr, next] = [resampled[i - 1], resampled[i], resampled[i + 1]];
+							let [dPrev, dNext] = [curr.subtract(prev), next.subtract(curr)];
+							if (dPrev.squaredLength() > 0.001 && dNext.squaredLength() > 0.001) {
+								let [nPrev, nNext] = [dPrev.normalized(), dNext.normalized()];
+								let normal = nPrev.add(nNext).divide(2);
+								if (normal.squaredLength() < 0.001) normal = nPrev.rotate(0.5 * Math.PI).multiply(pixelsPerUnit * this.ropeWidth);
+								else normal = normal.rotate(0.5 * Math.PI).multiply(pixelsPerUnit * this.ropeWidth);
+								middleRope.push(resampled[i]);
+								leftRope.push(stitchCount % 2 === 0 ? resampled[i].add(normal) : resampled[i].subtract(normal));
+								rightRope.push(stitchCount % 2 === 1 ? resampled[i].add(normal) : resampled[i].subtract(normal));
+								stitchCount++;
+							}
+						}
+					}
+					return [...middleRope, ...leftRope.reverse(), ...rightRope];
+				}
+			}
+
+			class TripleRope {
+				constructor(polyline, stitchLength = 3, ropeWidth = 3) {
+					[this.polyline, this.stitchLength, this.ropeWidth] = [polyline, stitchLength, ropeWidth];
+				}
+				getStitches(pixelsPerUnit) {
+					let resampled = this.polyline.getResampledBySpacing(pixelsPerUnit * this.stitchLength).vertices;
+					if (this.polyline.isClosed) resampled.push(resampled[0]);
+					let [middleRope, leftRope, rightRope] = [[], [], [], []];
+					for (let i = 0, stitchCount = 0; i < resampled.length; i++) {
+						if (i === 0 || i === resampled.length - 1) {
+							middleRope.push(resampled[i]);
+							leftRope.push(resampled[i]);
+							rightRope.push(resampled[i]);
+						} else {
+							let [prev, curr, next] = [resampled[i - 1], resampled[i], resampled[i + 1]];
+							let [dPrev, dNext] = [curr.subtract(prev), next.subtract(curr)];
+							if (dPrev.squaredLength() > 0.001 && dNext.squaredLength() > 0.001) {
+								let [nPrev, nNext] = [dPrev.normalized(), dNext.normalized()];
+								let normal = nPrev.add(nNext).divide(2);
+								if (normal.squaredLength() < 0.001) normal = nPrev.rotate(0.5 * Math.PI).multiply(pixelsPerUnit * this.ropeWidth);
+								else normal = normal.rotate(0.5 * Math.PI).multiply(pixelsPerUnit * this.ropeWidth);
+								middleRope.push(resampled[i]);
+								leftRope.push(stitchCount % 2 === 0 ? resampled[i].add(normal) : resampled[i].subtract(normal));
+								rightRope.push(stitchCount % 2 === 1 ? resampled[i].add(normal) : resampled[i].subtract(normal));
+								stitchCount++;
+							}
+						}
+					}
+					return [...middleRope, ...leftRope.reverse(), ...rightRope, ...middleRope.slice().reverse()];
+				}
+			}
+
+
+			// ********** ln.js stuff ********** //
+			// create the scenes
+			let [redScene, blueScene] = [new ln.Scene(), new ln.Scene()];
+
+			// initialize shape inputs
+			let box = new ln.Box(new ln.Vector(-2, -2, -4), new ln.Vector(2, 2, 2));
+			let func = function (x, y) { return -1 / (x * x + y * y); };
+
+			// create the shapes
+			let redShape = new CustomShapeFunction(func, box, CustomShapeFunction.Below, 0, false);
+			let blueShape = new CustomShapeFunction(func, box, CustomShapeFunction.Below, 0, true);
+
+			// add shapes to scenes
+			redScene.addShape(redShape);
+			blueScene.addShape(blueShape);
+
+			// rendering parameters
+			let [eye, center, up] = [new ln.Vector(3, 0, 3), new ln.Vector(1.5, 0, 0), new ln.Vector(0, 0, 1)];
+			let [width, height] = [1024, 1024];
+			let [fovy, znear, zfar, step] = [50, 0.1, 100, 0.01];
+			// ********** ln.js stuff ********** //
+
+			// get the paths for each frame of the animation
+			let pathsForFrames = [];
+			let totalFrameCount = 8;
+			for (let i = 0; i < totalFrameCount; i++) {
+				[redShape.pct, blueShape.pct] = [i / totalFrameCount, i / totalFrameCount];
+				let redPaths = redScene.render(eye, center, up, width, height, fovy, znear, zfar, step);
+				let bluePaths = blueScene.render(eye, center, up, width, height, fovy, znear, zfar, step);
+				pathsForFrames.push({ frameCount: i, redPaths, bluePaths });
+			}
+
+
+			// let [xc, yc, fPad] = [4, 2, 0.025];
+			// let pattern = new Stitch.Pattern(xc * width + (xc - 1) * fPad * width, yc * height + (yc - 1) * fPad * height);
+			// let blueThread = pattern.addThread(0, 0, 255);
+			// let redThread = pattern.addThread(255, 0, 0);
+			// let blackThread = pattern.addThread(0, 0, 0);
+			// let [stitchLength, ropeWidth] = [3, 0.25];
+			// let [x, y] = [0, 0];
+			// for (let pathsForFrame of pathsForFrames) {
+			// 	blackThread.addRun(new Stitch.Runs.MultiRun([
+			// 		new DoubleRope(Stitch.Math.Polyline.fromArrays([[ropeWidth, ropeWidth], [width - ropeWidth, ropeWidth]]).translate(x, y), stitchLength, ropeWidth),
+			// 		new DoubleRope(Stitch.Math.Polyline.fromArrays([[width - ropeWidth, ropeWidth], [width - ropeWidth, height - ropeWidth]]).translate(x, y), stitchLength, ropeWidth),
+			// 		new DoubleRope(Stitch.Math.Polyline.fromArrays([[width - ropeWidth, height - ropeWidth], [ropeWidth, height - ropeWidth]]).translate(x, y), stitchLength, ropeWidth),
+			// 		new DoubleRope(Stitch.Math.Polyline.fromArrays([[ropeWidth, height - ropeWidth], [ropeWidth, ropeWidth]]).translate(x, y), stitchLength, ropeWidth)
+			// 	]));
+			// 	for (let bluePath of pathsForFrame.bluePaths.paths) {
+			// 		let bluePolyline = new Stitch.Math.Polyline();
+			// 		for (let point of bluePath.points) bluePolyline.addVertex(point.X + x, height - point.Y + y);
+			// 		blueThread.addRun(new TripleRope(bluePolyline, stitchLength, ropeWidth));
+			// 	}
+			// 	for (let redPath of pathsForFrame.redPaths.paths) {
+			// 		let redPolyline = new Stitch.Math.Polyline(false);
+			// 		for (let point of redPath.points) redPolyline.addVertex(point.X + x, height - point.Y + y);
+			// 		redThread.addRun(new TripleRope(redPolyline, stitchLength, ropeWidth));
+			// 	}
+			// 	x += width + fPad * width;
+			// 	if (x > pattern.width) [x, y] = [0, y + height + fPad * height];
+			// }
+
+			let patternForFrames = [];
+			for (let i = 0; i < pathsForFrames.length; i++) {
+				let [xc, yc, fPad] = [2, 4, 0.025];
+				let pattern = new Stitch.Pattern(xc * width + (xc - 1) * fPad * width, yc * height + (yc - 1) * fPad * height);
+				let blueThread = pattern.addThread(0, 0, 255);
+				let redThread = pattern.addThread(255, 0, 0);
+				let blackThread = pattern.addThread(0, 0, 0);
+				let [stitchLength, ropeWidth] = [3, 0.25];
+				let [x, y] = [0, 0];
+				for (let j = 0; j < pathsForFrames.length; j++) {
+					blackThread.addRun(new Stitch.Runs.MultiRun([
+						new DoubleRope(Stitch.Math.Polyline.fromArrays([[ropeWidth, ropeWidth], [width - ropeWidth, ropeWidth]]).translate(x, y), stitchLength, ropeWidth),
+						new DoubleRope(Stitch.Math.Polyline.fromArrays([[width - ropeWidth, ropeWidth], [width - ropeWidth, height - ropeWidth]]).translate(x, y), stitchLength, ropeWidth),
+						new DoubleRope(Stitch.Math.Polyline.fromArrays([[width - ropeWidth, height - ropeWidth], [ropeWidth, height - ropeWidth]]).translate(x, y), stitchLength, ropeWidth),
+						new DoubleRope(Stitch.Math.Polyline.fromArrays([[ropeWidth, height - ropeWidth], [ropeWidth, ropeWidth]]).translate(x, y), stitchLength, ropeWidth)
+					]));
+					for (let bluePath of pathsForFrames[(i + j) % pathsForFrames.length].bluePaths.paths) {
+						let bluePolyline = new Stitch.Math.Polyline();
+						for (let point of bluePath.points) bluePolyline.addVertex(point.X + x, height - point.Y + y);
+						blueThread.addRun(new TripleRope(bluePolyline, stitchLength, ropeWidth));
+					}
+					for (let redPath of pathsForFrames[(i + j) % pathsForFrames.length].redPaths.paths) {
+						let redPolyline = new Stitch.Math.Polyline(false);
+						for (let point of redPath.points) redPolyline.addVertex(point.X + x, height - point.Y + y);
+						redThread.addRun(new TripleRope(redPolyline, stitchLength, ropeWidth));
+					}
+					x += width + fPad * width;
+					if (x > pattern.width) [x, y] = [0, y + height + fPad * height];
+				}
+				patternForFrames.push({ frameCount: i, pattern });
+			}
+
+
+			// animate the output
+			let svg = patternForFrames[0].pattern.draw(window.innerWidth, window.innerHeight);
+			function animate() {
+				frameCount++;
+				svg.remove();
+				svg = patternForFrames[frameCount % patternForFrames.length].pattern.draw(window.innerWidth, window.innerHeight);
+				requestAnimationFrame(() => { setTimeout(animate, 60); });
+			}
+			let frameCount = 0;
+			animate();
+
+			// // animate the output
+			// let svg = pattern.draw(window.innerWidth, window.innerHeight);
+
+			// create the download modal and add the event listener
+			let modal = Stitch.Browser.getDownloadModal(patternForFrames[0].pattern, "animationSingleSheet", document.body);
+			window.addEventListener("keydown", (e) => { if (e.code === "KeyD") modal.open(); });
+
+			// // press D to download all files
+			// let outputWidth = Stitch.Units.inToMm(5);
+			// let outputHeight = outputWidth * height / width;
+			// let filename = function(frameCount) { return `animation-${frameCount}.dst`; };
+			// window.addEventListener("keydown", (e) => {
+			// 	if (e.code === "KeyD") {
+			// 		for (let patternForFrame of patternForFrames) {
+			// 			Stitch.IO.write(patternForFrame.pattern, outputWidth, outputHeight, filename(patternForFrame.frameCount));
+			// 		}
+			// 	}
+			// });
+
+		</script>
+	</body>
+
+</html>

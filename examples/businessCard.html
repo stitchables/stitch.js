@@ -19,6 +19,38 @@
 	<body>
 		<script>
 
+			class TripleRope {
+				constructor(polyline, stitchLength = 3, ropeWidth = 3) {
+					[this.polyline, this.stitchLength, this.ropeWidth] = [polyline, stitchLength, ropeWidth];
+				}
+				getStitches(pixelsPerUnit) {
+					let resampled = this.polyline.getResampledBySpacing(pixelsPerUnit * this.stitchLength).vertices;
+					if (this.polyline.isClosed) resampled.push(resampled[0]);
+					let [middleRope, leftRope, rightRope] = [[], [], [], []];
+					for (let i = 0, stitchCount = 0; i < resampled.length; i++) {
+						if (i === 0 || i === resampled.length - 1) {
+							middleRope.push(resampled[i]);
+							leftRope.push(resampled[i]);
+							rightRope.push(resampled[i]);
+						} else {
+							let [prev, curr, next] = [resampled[i - 1], resampled[i], resampled[i + 1]];
+							let [dPrev, dNext] = [curr.subtract(prev), next.subtract(curr)];
+							if (dPrev.squaredLength() > 0.001 && dNext.squaredLength() > 0.001) {
+								let [nPrev, nNext] = [dPrev.normalized(), dNext.normalized()];
+								let normal = nPrev.add(nNext).divide(2);
+								if (normal.squaredLength() < 0.001) normal = nPrev.rotate(0.5 * Math.PI).multiply(pixelsPerUnit * this.ropeWidth);
+								else normal = normal.rotate(0.5 * Math.PI).multiply(pixelsPerUnit * this.ropeWidth);
+								middleRope.push(resampled[i]);
+								leftRope.push(stitchCount % 2 === 0 ? resampled[i].add(normal) : resampled[i].subtract(normal));
+								rightRope.push(stitchCount % 2 === 1 ? resampled[i].add(normal) : resampled[i].subtract(normal));
+								stitchCount++;
+							}
+						}
+					}
+					return [...middleRope, ...leftRope.reverse(), ...rightRope, ...middleRope.slice().reverse()];
+				}
+			}
+
 			// create a new pattern
 			let pattern = new Stitch.Pattern(350, 200);
 
@@ -33,7 +65,8 @@
 				new Stitch.Math.Vector(pattern.width, pattern.height), new Stitch.Math.Vector(0, pattern.height)
 			], true);
 			let padding = 3;
-			redThread.addRun(new Stitch.Runs.Satin(2 * padding, 0.2, border.getOffset(-padding).getRounded(4 * padding)));
+			// redThread.addRun(new Stitch.Runs.Satin(2 * padding, 0.2, border.getOffset(-padding).getRounded(4 * padding)));
+			redThread.addRun(new TripleRope(border.getOffset(-padding).getRounded(4 * padding), 3, 0.25));
 
 			// create the "stitch" run
 			for (let letter of stitchData.letters) {
@@ -44,7 +77,8 @@
 						let y = 0.7 * pattern.width * path[i + 1] / stitchData.size + 0.3 * pattern.height;
 						polyline.addVertex(x, y);
 					}
-					for (let i = -5; i <= 5; i++) greenThread.addRun(new Stitch.Runs.Run(2, polyline.getOffset(0.25 * i)));
+					// for (let i = -5; i <= 5; i++) greenThread.addRun(new Stitch.Runs.Run(2, polyline.getOffset(0.25 * i)));
+					greenThread.addRun(new TripleRope(polyline, 3, 0.25));
 				}
 			}
 
@@ -87,8 +121,9 @@
 						polyline.addVertex(x, y);
 					}
 					let roundedPolyline = polyline.getSimplified(2).getRounded(2);
-					blueThread.addRun(new CustomRun(3, 2, false, roundedPolyline));
-					blueThread.addRun(new CustomRun(3, 2, true, roundedPolyline));
+					// blueThread.addRun(new CustomRun(3, 2, false, roundedPolyline));
+					// blueThread.addRun(new CustomRun(3, 2, true, roundedPolyline));
+					blueThread.addRun(new TripleRope(roundedPolyline, 3, 0.25));
 				}
 			}
 

@@ -192,6 +192,11 @@ Stitch.Math = {
       return polyline;
     }
     addVertex(x, y) { this.vertices.push(new Stitch.Math.Vector(x, y)); }
+    translate(x, y) {
+      let translatePolyline = new Stitch.Math.Polyline(this.isClosed);
+      for (let vertex of this.vertices) translatePolyline.addVertex(vertex.x + x, vertex.y + y);
+      return translatePolyline;
+    }
     getRounded(radius, stepAngle = 0.1) {
       let roundedPolyline = new Stitch.Math.Polyline(this.isClosed);
       if (!this.isClosed) roundedPolyline.addVertex(this.vertices[0].x, this.vertices[0].y);
@@ -1322,7 +1327,7 @@ Stitch.Browser = {
     Stitch.Browser.setStyles(dimensionsTitle, { fontSize: '16px', fontWeight: 'bold', gridArea: '4 / 1 / 4 / 3' });
     grid.appendChild(dimensionsTitle);
     let dimensionsSlider = document.createElement('input');
-    Stitch.Browser.setAttributes(dimensionsSlider, { type: 'range', min: 1, max: 250, value: 50 });
+    Stitch.Browser.setAttributes(dimensionsSlider, { type: 'range', min: 1, max: 250, value: 89 });
     Stitch.Browser.setStyles(dimensionsSlider, { width: '80%', gridArea: '5 / 1 / 5 / 3' });
     calculateDimensions();
     dimensionsSlider.addEventListener('input', () => {
@@ -1420,6 +1425,17 @@ Stitch.Runs = {
         normal = normal.normalized().rotate(0.5 * Math.PI);
         stitches.push(current.add(normal.multiply(0.5 * this.width)));
         stitches.push(current.subtract(normal.multiply(0.5 * this.width)));
+      }
+      return stitches;
+    }
+  },
+
+  MultiRun: class {
+    constructor(runs) { this.runs = runs; }
+    getStitches(pixelsPerUnit) {
+      let stitches = [];
+      for (let run of this.runs) {
+        stitches = stitches.concat(run.getStitches(pixelsPerUnit));
       }
       return stitches;
     }
