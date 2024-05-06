@@ -45,8 +45,8 @@
 			let ablesAngles = [0.1 * Math.PI, 0.1 * Math.PI, 0.1 * Math.PI, 0.1 * Math.PI, 0.1 * Math.PI];
 
 			// fill params
-			let underlay = {length: 1, density: 1};
-			let overlay = {length: 1, density: 0.2};
+			let underlay = {length: 3, density: 1};
+			let overlay = {length: 3, density: 0.2};
 
 			let padding = 6;
 			let border = Stitch.Math.Polyline.fromArrays([[0, 0], [pattern.width, 0], [pattern.width, pattern.height], [0, pattern.height]], true).getRounded(4 * padding);
@@ -90,17 +90,17 @@
 			for (let shape of stitchShapes) backgroundShape = backgroundShape.subtract(shape);
 			for (let shape of ablesShapes) backgroundShape = backgroundShape.subtract(shape);
 
-			backgroundThread.addRun(new Stitch.Runs.ComplexFill(underlay.length, underlay.density, backgroundAngle, border.getOffset(-padding)));
+			backgroundThread.addRun(new Stitch.Runs.SimpleFill(underlay.length, underlay.density, backgroundAngle, border.getOffset(-padding)));
 
 			let backgroundPolylines = backgroundShape.toPolylines();
 			for (let shape of backgroundPolylines) {
-				backgroundThread.addRun(new Stitch.Runs.ComplexFill(overlay.length, overlay.density, backgroundAngle + 0.5 * Math.PI, shape.polyline, shape.contours));
+				backgroundThread.addRun(new Stitch.Runs.SimpleFill(overlay.length, overlay.density, backgroundAngle + 0.5 * Math.PI, shape.polyline, shape.contours));
 			}
 
 			for (let letterShape of stitchShapes) {
 				let shapePolylines = letterShape.toPolylines();
 				for (let shapePolyline of shapePolylines) {
-					stitchThread.addRun(new Stitch.Runs.ComplexFill(overlay.length, overlay.density, stitchAngle + 0.5 * Math.PI, shapePolyline.polyline, shapePolyline.contours));
+					stitchThread.addRun(new Stitch.Runs.SimpleFill(overlay.length, overlay.density, stitchAngle + 0.5 * Math.PI, shapePolyline.polyline, shapePolyline.contours));
 				}
 			}
 
@@ -109,7 +109,7 @@
 				let letterShape = ablesShapes[i];
 				let shapePolylines = letterShape.toPolylines();
 				for (let shapePolyline of shapePolylines) {
-					ablesThread.addRun(new Stitch.Runs.ComplexFill(overlay.length, overlay.density, ablesAngles[i] + 0.5 * Math.PI, shapePolyline.polyline, shapePolyline.contours));
+					ablesThread.addRun(new Stitch.Runs.SimpleFill(overlay.length, overlay.density, ablesAngles[i] + 0.5 * Math.PI, shapePolyline.polyline, shapePolyline.contours));
 				}
 			}
 

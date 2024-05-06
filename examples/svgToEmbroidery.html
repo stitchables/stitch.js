@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SVG To Embroidery</title>
+  <script src="../stitch.js"></script>
+  <style>
+    body {
+      margin: 0;
+    }
+    #ui {
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+    }
+    #top-bar {
+      width: 100vw;
+      min-height: 200px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    #options {
+      margin: 10px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+    }
+    #droppable-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100%;
+      flex-grow: 3;
+    }
+    #droppable-area {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      width: calc(100% - 10px);
+      height: calc(100% - 10px);
+      border: 2px dashed #ccc;
+    }
+    #option-container {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #option-label {
+      width: 140px;
+    }
+    #option-output {
+      width: 80px;
+    }
+    #embroidery-container {
+      flex-grow: 3;
+      width: 100vw;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .slider {
+      width: 200px;
+    }
+    .number {
+      width: 200px;
+    }
+    input::-webkit-outer-spin-button,
+    input::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    input[type=number] {
+      -moz-appearance: textfield;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="ui">
+    <div id="top-bar">
+      <div id="options">
+        <div id="option-container">
+          <label id="option-label">Max Join Distance</label>
+          <input type="range" min="0" max="100" step="0.1" value="50" class="slider" id="max-join-distance-slider" />
+          <span id="option-output"><span id="max-join-distance-value">50</span> <span id="units">mm</span></span>
+        </div>
+        <div id="option-container">
+          <label id="option-label">Stitch Length</label>
+          <input type="range" min="1" max="6" step="0.1" value="3.5" class="slider" id="stitch-length-slider" />
+          <span id="option-output"><span class="slider-value" id="stitch-length-value">3.5</span> <span id="units">mm</span></span>
+        </div>
+        <div id="option-container">
+          <label id="option-label">Min Path Length</label>
+          <input type="range" min="0" max="10" step="0.1" value="5" class="slider" id="min-path-length-slider" />
+          <span id="option-output"><span class="slider-value" id="min-path-length-value">5</span> <span id="units">mm</span></span>
+        </div>
+        <div id="option-container">
+          <label id="option-label">Output Width (mm)</label>
+          <input id="width-mm-input" class="number" type="number" min="0" max="1000" value="0" step="0.1" disabled />
+        </div>
+        <div id="option-container">
+          <label id="option-label">Output Height (mm)</label>
+          <input id="height-mm-input" class="number" type="number" min="0" max="1000" value="0" step="0.1" disabled />
+        </div>
+        <div id="option-container">
+          <label id="option-label">Output Width (in)</label>
+          <input id="width-in-input" class="number" type="number" min="0" max="1000" value="0" step="0.1" disabled />
+        </div>
+        <div id="option-container">
+          <label id="option-label">Output Height (in)</label>
+          <input id="height-in-input" class="number" type="number" min="0" max="1000" value="0" step="0.1" disabled />
+        </div>
+        <hr class="solid" style="width: 100%;">
+        <div id="option-container">
+          <span>Original Path Count: <span id="original-path-count">0</span></span>
+        </div>
+        <div id="option-container">
+          <span>Optimized Path Count: <span id="optimized-path-count">0</span></span>
+        </div>
+      </div>
+      <div id="droppable-container">
+        <div id="droppable-area">Drop Svg Here</div>
+      </div>
+    </div>
+    <div id="embroidery-container"></div>
+  </div>
+  <div id="download-modal"></div>
+  <div id="svg" style="display: none"></div>
+
+  <script>
+
+    let droppableArea = document.getElementById("droppable-area");
+    let fileContent = document.getElementById("svg");
+    let embroideryContainer = document.getElementById("embroidery-container");
+    let downloadModal = document.getElementById("download-modal");
+
+    let svg, svgPaths;
+    let [outputWidth, outputHeight] = [0, 0];
+    let [svgXPos, svgYPos, svgWidth, svgHeight] = [0, 0, 0, 0];
+
+    // sliders
+    let maxJoinDistanceSlider = document.getElementById("max-join-distance-slider");
+    let maxJoinDistanceValue = document.getElementById("max-join-distance-value");
+    maxJoinDistanceSlider.addEventListener("input", function() { maxJoinDistanceValue.textContent = maxJoinDistanceSlider.value; });
+    let stitchLengthSlider = document.getElementById("stitch-length-slider");
+    let stitchLengthValue = document.getElementById("stitch-length-value");
+    stitchLengthSlider.addEventListener("input", function() { stitchLengthValue.textContent = stitchLengthSlider.value; });
+    let minPathLengthSlider = document.getElementById("min-path-length-slider");
+    let minPathLengthValue = document.getElementById("min-path-length-value");
+    minPathLengthSlider.addEventListener("input", function() { minPathLengthValue.textContent = minPathLengthSlider.value; });
+
+    maxJoinDistanceSlider.addEventListener("change", function() {
+      if (isPatternLoaded) {
+        patternOptions.maximumJoinDistance = parseFloat(maxJoinDistanceSlider.value);
+        resetEmbroidery();
+        setTimeout(() => { convertToOptimizedEmbroidery(parseFloat(stitchLengthSlider.value), parseFloat(minPathLengthSlider.value), parseFloat(maxJoinDistanceSlider.value)); }, 10);
+      }
+    });
+    stitchLengthSlider.addEventListener("change", function() {
+      if (isPatternLoaded) {
+        resetEmbroidery();
+        setTimeout(() => { convertToOptimizedEmbroidery(parseFloat(stitchLengthSlider.value), parseFloat(minPathLengthSlider.value), parseFloat(maxJoinDistanceSlider.value)); }, 10);
+      }
+    });
+    minPathLengthSlider.addEventListener("change", function() {
+      if (isPatternLoaded) {
+        patternOptions.minimumPathLength = parseFloat(minPathLengthSlider.value);
+        resetEmbroidery();
+        setTimeout(() => { convertToOptimizedEmbroidery(parseFloat(stitchLengthSlider.value), parseFloat(minPathLengthSlider.value), parseFloat(maxJoinDistanceSlider.value)); }, 10);
+      }
+    });
+
+    // width/height inputs
+    let widthMmInput = document.getElementById("width-mm-input");
+    let heightMmInput = document.getElementById("height-mm-input");
+    let widthInInput = document.getElementById("width-in-input");
+    let heightInInput = document.getElementById("height-in-input");
+
+    widthMmInput.addEventListener("change", function() {
+      widthInInput.value = Stitch.Units.mmToIn(widthMmInput.value).toFixed(2);
+      heightMmInput.value = Number(widthMmInput.value * pattern.height / pattern.width).toFixed(2);
+      heightInInput.value = Stitch.Units.mmToIn(heightMmInput.value).toFixed(2);
+      patternOptions.pixelMultiplier = outputWidth / widthMmInput.value;
+      resetEmbroidery();
+      setTimeout(() => { convertToOptimizedEmbroidery(parseFloat(stitchLengthSlider.value), parseFloat(minPathLengthSlider.value), parseFloat(maxJoinDistanceSlider.value)); }, 10);
+    });
+    heightMmInput.addEventListener("change", function() {
+      heightInInput.value = Stitch.Units.mmToIn(heightMmInput.value).toFixed(2);
+      widthMmInput.value = Number(heightMmInput.value * pattern.width / pattern.height).toFixed(2);
+      widthInInput.value = Stitch.Units.mmToIn(widthMmInput.value).toFixed(2);
+      patternOptions.pixelMultiplier = outputWidth / widthMmInput.value;
+      resetEmbroidery();
+      setTimeout(() => { convertToOptimizedEmbroidery(parseFloat(stitchLengthSlider.value), parseFloat(minPathLengthSlider.value), parseFloat(maxJoinDistanceSlider.value)); }, 10);
+    });
+    widthInInput.addEventListener("change", function() {
+      widthMmInput.value = Stitch.Units.inToMm(widthInInput.value).toFixed(2);
+      heightInInput.value = Number(widthInInput.value * pattern.height / pattern.width).toFixed(2);
+      heightMmInput.value = Stitch.Units.inToMm(heightInInput.value).toFixed(2);
+      patternOptions.pixelMultiplier = outputWidth / widthMmInput.value;
+      resetEmbroidery();
+      setTimeout(() => { convertToOptimizedEmbroidery(parseFloat(stitchLengthSlider.value), parseFloat(minPathLengthSlider.value), parseFloat(maxJoinDistanceSlider.value)); }, 10);
+    });
+    heightInInput.addEventListener("change", function() {
+      heightMmInput.value = Stitch.Units.inToMm(heightInInput.value).toFixed(2);
+      widthInInput.value = Number(heightInInput.value * pattern.height / pattern.width).toFixed(2);
+      widthMmInput.value = Stitch.Units.inToMm(widthInInput.value).toFixed(2);
+      patternOptions.pixelMultiplier = outputWidth / widthMmInput.value;
+      resetEmbroidery();
+      setTimeout(() => { convertToOptimizedEmbroidery(parseFloat(stitchLengthSlider.value), parseFloat(minPathLengthSlider.value), parseFloat(maxJoinDistanceSlider.value)); }, 10);
+    });
+
+    // path counts
+    let originalPathCount = document.getElementById("original-path-count");
+    let optimizedPathCount = document.getElementById("optimized-path-count");
+
+    // initialize the embroidery pattern
+    let isPatternLoaded = false;
+    let patternOptions = {
+      parentElement: embroideryContainer,
+      pixelMultiplier: 3.78,
+      minimumPathLength: parseFloat(minPathLengthSlider.value),
+      maximumJoinDistance: parseFloat(maxJoinDistanceSlider.value)
+    };
+    let pattern = new Stitch.Pattern(0, 0);
+
+    // setup drag and drop
+    document.addEventListener("DOMContentLoaded", function() {
+      droppableArea.addEventListener("dragover", function(event) {
+        event.preventDefault();
+        droppableArea.style.backgroundColor = "#0005";
+      });
+      droppableArea.addEventListener("dragleave", function(event) {
+        droppableArea.style.backgroundColor = "#0000";
+      });
+      droppableArea.addEventListener("drop", function(event) {
+        event.preventDefault();
+        isPatternLoaded = true;
+        widthMmInput.disabled = false;
+        heightMmInput.disabled = false;
+        widthInInput.disabled = false;
+        heightInInput.disabled = false;
+        patternOptions.pixelMultiplier = 3.78;
+        resetEmbroidery();
+        fileContent.replaceChildren();
+        droppableArea.style.backgroundColor = "#0000";
+        let file = event.dataTransfer.files[0];
+        if (file.type === "image/svg+xml") {
+          let reader = new FileReader();
+          reader.onload = function(event) {
+            fileContent.innerHTML = event.target.result;
+            [svgXPos, svgYPos, svgWidth, svgHeight] = document.querySelector("svg").getAttribute("viewBox").split(" ");
+            splitCompoundPaths();
+            convertToOptimizedEmbroidery(parseFloat(stitchLengthSlider.value), parseFloat(minPathLengthSlider.value), parseFloat(maxJoinDistanceSlider.value));
+            isPatternLoaded = true;
+          };
+          reader.readAsText(file);
+        } else {
+          alert("Unsupported file type. Only SVG files are supported.");
+        }
+      });
+    });
+
+    function resetEmbroidery() {
+      embroideryContainer.replaceChildren();
+      downloadModal.replaceChildren();
+      window.removeEventListener("resize", drawEmbroidery);
+      window.removeEventListener("keydown", handleKeypress);
+    }
+
+    let handleKeypress = function(e) {
+      if (e.code === "KeyD") {
+        Stitch.IO.write(pattern, widthInput.value, heightInput.value, `svgToEmbroidery.dst`, patternOptions.minimumPathLength, patternOptions.maximumJoinDistance);
+      } else if (e.code === "KeyP") {
+        Stitch.IO.write(pattern, widthInput.value, heightInput.value, `svgToEmbroidery.pes`, patternOptions.minimumPathLength, patternOptions.maximumJoinDistance);
+      }
+    }
+
+    let drawEmbroidery = Stitch.Browser.debounce(() => {
+      let boundingBox = embroideryContainer.getBoundingClientRect();
+      if (svg) svg.remove();
+      svg = pattern.draw(0.95 * boundingBox.width, 0.95 * boundingBox.height, patternOptions);
+      optimizedPathCount.textContent = svg.querySelectorAll("path").length;
+      outputWidth = parseFloat(svg.getAttribute("width").substring(0, svg.getAttribute("width").length - 2));
+      outputHeight = parseFloat(svg.getAttribute("height").substring(0, svg.getAttribute("height").length - 2));
+      widthMmInput.value = Number((outputWidth / patternOptions.pixelMultiplier).toFixed(2));
+      heightMmInput.value = Number((outputHeight / patternOptions.pixelMultiplier).toFixed(2));
+      widthInInput.value = Stitch.Units.mmToIn(widthMmInput.value).toFixed(2);
+      heightInInput.value = Stitch.Units.mmToIn(heightMmInput.value).toFixed(2);
+    });
+
+    function splitCompoundPaths() {
+      let paths = document.querySelectorAll("path");
+      for (let path of paths) {
+        let pathCommands = path.getAttribute("d").split(/([MmLlHhVvCcSsQqTtAaZz])/).filter(command => command.trim() !== "");
+        let currentSubpath = "";
+        for (let i = 0; i < pathCommands.length; i++) {
+          let command = pathCommands[i].trim();
+          if (command === "M" || command === "m") {
+            if (currentSubpath !== '') {
+              let newPath = path.cloneNode();
+              newPath.setAttribute("d", currentSubpath);
+              path.after(newPath);
+            }
+            currentSubpath = command + " ";
+          } else {
+            currentSubpath += command + " ";
+          }
+        }
+        let newPath = path.cloneNode();
+        newPath.setAttribute("d", currentSubpath);
+        path.after(newPath);
+        path.remove();
+      }
+      svgPaths = document.querySelectorAll("path");
+    }
+
+    function convertToOptimizedEmbroidery(resampleSize, minPathLength, maxJoinDistance) {
+      pattern = new Stitch.Pattern(svgWidth, svgHeight);
+      let threads = {};
+      originalPathCount.textContent = svgPaths.length;
+      for (let path of svgPaths) {
+        let strokeColor = window.getComputedStyle(path).stroke;
+        if (strokeColor !== "none") {
+          if (!(strokeColor in threads)) {
+            let [r, g, b] = strokeColor.substring(4, strokeColor.length - 1).split(", ");
+            threads[strokeColor] = pattern.addThread(r, g, b);
+          }
+          let thread = threads[strokeColor];
+          let totalLength = path.getTotalLength();
+          let polyline = new Stitch.Math.Polyline(false);
+          for (let i = 0; i < totalLength; i += resampleSize) {
+            let point = path.getPointAtLength(i);
+            polyline.addVertex(point.x - svgXPos, point.y - svgYPos);
+          }
+          let point = path.getPointAtLength(totalLength);
+          polyline.addVertex(point.x - svgXPos, point.y - svgYPos);
+          thread.addRun(new Stitch.Runs.Run(resampleSize, polyline));
+        }
+      }
+      drawEmbroidery();
+      window.addEventListener("resize", drawEmbroidery);
+      window.addEventListener("keydown", handleKeypress);
+    }
+
+  </script>
+</body>
+</html>

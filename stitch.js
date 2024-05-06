@@ -13,7 +13,9 @@ Stitch.Pattern = class {
       parentElement: document.body,
       showStitches: false,
       sigFigs: 5,
-      namespace: "http://www.w3.org/2000/svg"
+      namespace: "http://www.w3.org/2000/svg",
+      minimumPathLength: 0,
+      maximumJoinDistance: 0
     };
   }
   addThread(red, green, blue) {
@@ -21,7 +23,7 @@ Stitch.Pattern = class {
     this.threads.push(thread);
     return thread;
   }
-  getStitches(width, height, pixelMultiplier = 3.78) {
+  getStitches(width, height, pixelMultiplier = 3.78, minimumPathLength = 0, maximumJoinDistance = 0) {
     let dimensions = width / height > this.width / this.height ? { width: (this.width / this.height) * height, height: height } : { width: width, height: (this.height / this.width) * width };
     let pixelsPerUnit = pixelMultiplier * this.width / dimensions.width;
     let stitches = {
@@ -31,11 +33,13 @@ Stitch.Pattern = class {
       stitchCount: 0,
       threads: []
     };
+
     for (let t of this.threads) {
       let thread = { thread: t, runs: [] };
       for (let r of t.runs) {
         let run = [];
         for (let stitch of r.getStitches(pixelsPerUnit)) {
+          if (isNaN(stitch.x) || isNaN(stitch.y)) continue;
           run.push(new Stitch.Math.Vector(stitch.x, stitch.y));
           stitches.stitchCount++;
           if (stitch.x < stitches.boundingBox.min.x) stitches.boundingBox.min.x = stitch.x;
@@ -47,13 +51,44 @@ Stitch.Pattern = class {
       }
       stitches.threads.push(thread);
     }
+
+    if (minimumPathLength > 0) {
+      for (let t of stitches.threads) {
+        for (let i = t.runs.length - 1; i >= 0; i--) {
+          let runLength = 0;
+          for (let j = 1; j < t.runs[i].length; j++) {
+            runLength += t.runs[i][j - 1].distance(t.runs[i][j]) / pixelMultiplier;
+          }
+          if (runLength < minimumPathLength) {
+            t.runs.splice(i, 1);
+          }
+        }
+      }
+    }
+
+    if (maximumJoinDistance > 0) {
+      for (let t of stitches.threads) {
+        let polylines = [];
+        for (let r of t.runs) polylines.push(Stitch.Math.Polyline.fromVectors(r));
+        let joinedPolylines = Stitch.Optimize.joinPolylines(polylines, maximumJoinDistance * pixelMultiplier);
+        t.runs = [];
+        for (let joinedPolyline of joinedPolylines) {
+          let run = [];
+          for (let v of joinedPolyline.vertices) {
+            run.push(new Stitch.Math.Vector(v.x, v.y));
+          }
+          t.runs.push(run);
+        }
+      }
+    }
+
     return stitches;
   }
   getSvg(width, height, options = null) {
     if (options) {
       for (let [key, value] of Object.entries(this.defaultOptions)) if (!(key in options)) options[key] = value;
     } else options = this.defaultOptions;
-    let stitches = this.getStitches(width, height, options.pixelMultiplier);
+    let stitches = this.getStitches(width, height, options.pixelMultiplier, options.minimumPathLength, options.maximumJoinDistance);
     let svg = document.createElementNS(options.namespace, "svg");
     svg.setAttribute("viewBox", `0 0 ${this.width} ${this.height}`);
     svg.setAttribute("width", `${stitches.dimensions.width}${options.units}`);
@@ -111,6 +146,42 @@ Stitch.Units = {
   inToMm: function (inches) { return inches * 25.4; },
   mmToIn: function (millimeters) { return millimeters / 25.4; }
 };
+
+Stitch.Optimize = {
+  joinPolylines: function(polylines, maxJoinDistance) {
+    let joinedPolylines = [polylines[0]];
+    let queue = polylines.slice(1);
+    while (true) {
+      let [done, nextPolyline, queueIndex, minDistance, reverseFlag, frontAppendFlag] = [true, null, 0, Infinity, false, false];
+      for (let [i, polyline] of queue.entries()) {
+        let currentStart = joinedPolylines[joinedPolylines.length - 1].vertices[0];
+        let currentEnd = joinedPolylines[joinedPolylines.length - 1].vertices[joinedPolylines[joinedPolylines.length - 1].vertices.length - 1];
+        let nextStart = polyline.vertices[0];
+        let nextEnd = polyline.vertices[polyline.vertices.length - 1];
+        let [dcsns, dcsne, dcens, dcene] = [currentStart.distance(nextStart), currentStart.distance(nextEnd), currentEnd.distance(nextStart), currentEnd.distance(nextEnd)];
+        let d = Math.min(dcsns, dcsne, dcens, dcene);
+        if (d < minDistance) {
+          [nextPolyline, queueIndex, minDistance] = [polyline, i, d];
+          reverseFlag = (Math.min(dcsns, dcene) < Math.min(dcsne, dcens)) ? true : false;
+          frontAppendFlag = (Math.min(dcsns, dcsne) < Math.min(dcens, dcene)) ? true : false;
+        }
+        done = false;
+      }
+      if (minDistance < maxJoinDistance) {
+        if (reverseFlag) nextPolyline.vertices.reverse();
+        if (frontAppendFlag) joinedPolylines[joinedPolylines.length - 1].vertices = nextPolyline.vertices.concat(joinedPolylines[joinedPolylines.length - 1].vertices);
+        else joinedPolylines[joinedPolylines.length - 1].vertices = joinedPolylines[joinedPolylines.length - 1].vertices.concat(nextPolyline.vertices);
+      } else if (!done) {
+        if (reverseFlag) nextPolyline.vertices.reverse();
+        // if (frontAppendFlag) joinedPolylines.reverse();
+        joinedPolylines.push(nextPolyline);
+      }
+      if (done) break;
+      else queue.splice(queueIndex, 1);
+    }
+    return joinedPolylines;
+  }
+}
 
 Stitch.Math = {
 
@@ -458,10 +529,7 @@ Stitch.Math = {
       if (index12 > -1) this.edges[vertex1.toString()].splice(index12, 1);
       if (index21 > -1) this.edges[vertex2.toString()].splice(index21, 1);
     }
-    findEdgeIndex(from, to) {
-      let index = this.edges[from.toString()].findIndex((n) => n.vertex === to.toString());
-      return (index === -1) ? null : index;
-    }
+    findEdgeIndex(from, to) { return this.edges[from.toString()].findIndex((n) => n.vertex === to.toString()); }
     copy() {
       let g = new Stitch.Math.Graph();
       for (let vertex of this.vertices) g.addVertex(vertex);
@@ -618,6 +686,42 @@ Stitch.Math = {
     priorityQueueDequeue() {
       let value = this.priorityQueue.shift();
       return value;
+    }
+
+    ccDfsUtil(v, visited, component) {
+      visited[v] = true;
+      component.push(v);
+      let neighbors = this.edges[v];
+      for (let i = 0; i < neighbors.length; i++) {
+        let neighbor = neighbors[i];
+        if (!visited[neighbor.vertex]) {
+          this.ccDfsUtil(neighbor.vertex, visited, component);
+        }
+      }
+    }
+    connectedComponentsDfs(v, visited, component) {
+      visited[v] = true;
+      component.push(v);
+      let neighbors = this.edges[v];
+      for (let i = 0; i < neighbors.length; i++) {
+        let neighbor = neighbors[i];
+        if (!visited[neighbor.vertex]) {
+          this.connectedComponentsDfs(neighbor.vertex, visited, component);
+        }
+      }
+    }
+    connectedComponents() {
+      let visited = {};
+      for (let vertex of this.vertices) visited[vertex] = false;
+      let components = [];
+      for (let v of this.vertices) {
+        if (!visited[v]) {
+          let component = [];
+          this.connectedComponentsDfs(v, visited, component);
+          components.push(component);
+        }
+      }
+      return components;
     }
   },
 
@@ -942,8 +1046,8 @@ Stitch.CSG = {
 };
 
 Stitch.IO = {
-  write: function(pattern, widthMM, heightMM, filename) {
-    let stitches = pattern.getStitches(widthMM, heightMM, 1);
+  write: function(pattern, widthMM, heightMM, filename, minimumPathLength = 0, maximumJoinDistance = 0) {
+    let stitches = pattern.getStitches(widthMM, heightMM, 1, minimumPathLength, maximumJoinDistance);
     // center the pattern and convert units to millimeters
     for (let i = 0; i < stitches.threads.length; i++) {
       for (let j = 0; j < stitches.threads[i].runs.length; j++) {
@@ -1429,15 +1533,83 @@ Stitch.Runs = {
       return stitches;
     }
   },
-
   MultiRun: class {
     constructor(runs) { this.runs = runs; }
     getStitches(pixelsPerUnit) {
       let stitches = [];
-      for (let run of this.runs) {
-        stitches = stitches.concat(run.getStitches(pixelsPerUnit));
+      for (let run of this.runs) stitches = stitches.concat(run.getStitches(pixelsPerUnit));
+      return stitches;
+    }
+  },
+
+  SimpleFill: class {
+    constructor(stitchLength, density, angle, polyline, contours = []) {
+      this.stitchLength = stitchLength;
+      this.density = density;
+      this.angle = Stitch.Math.Vector.fromAngle(angle);
+      this.polyline = polyline;
+      this.contours = contours;
+      this.boundingBox = this.polyline.getBoundingBox();
+      this.boundingBoxCenter = this.boundingBox.max.add(this.boundingBox.min).divide(2);
+      this.maxDistance = this.boundingBox.min.distance(this.boundingBoxCenter);
+    }
+    getStitches(pixelsPerUnit) {
+
+      let hatchLines = [];
+      for (let d = -this.maxDistance; d <= this.maxDistance; d += this.density * pixelsPerUnit) {
+        hatchLines.push({
+          start: this.boundingBoxCenter.add(this.angle.rotate(0.5 * Math.PI).multiply(d)).add(this.angle.multiply(this.maxDistance)),
+          end: this.boundingBoxCenter.add(this.angle.rotate(0.5 * Math.PI).multiply(d)).add(this.angle.multiply(-this.maxDistance))
+        });
+      }
+
+      let hatchLineSegments = [];
+      for (let [n, hatchLine] of hatchLines.entries()) {
+        let intersections = [];
+        for (let i = 0; i < this.polyline.vertices.length; i++) {
+          let p = this.polyline.vertices[i];
+          let q = this.polyline.vertices[(i + 1) % this.polyline.vertices.length];
+          let intersection = Stitch.Math.Utils.lineSegmentIntersection(hatchLine.start, hatchLine.end, p, q);
+          if (intersection) {
+            intersections.push({ position: intersection, distanceFromStart: hatchLine.start.distance(intersection) });
+          }
+        }
+        for (let contour of this.contours) {
+          for (let i = 0; i < contour.vertices.length; i++) {
+            let p = contour.vertices[i];
+            let q = contour.vertices[(i + 1) % contour.vertices.length];
+            let intersection = Stitch.Math.Utils.lineSegmentIntersection(hatchLine.start, hatchLine.end, p, q);
+            if (intersection) {
+              intersections.push({ position: intersection, distanceFromStart: hatchLine.start.distance(intersection) });
+            }
+          }
+        }
+        if (intersections.length > 0 && intersections.length % 2 === 0) {
+          intersections.sort((a, b) => { return a.distanceFromStart > b.distanceFromStart ? 1 : -1; });
+          for (let i = 0; i < intersections.length; i += 2) {
+            let polyline = new Stitch.Math.Polyline(false);
+            polyline.vertices.push(intersections[i].position);
+            for (let d = (n % 2 === 0) ? 0 : 0.5 * this.stitchLength * pixelsPerUnit; d < 2 * this.maxDistance; d += this.stitchLength * pixelsPerUnit) {
+              if (intersections[i].distanceFromStart < d && intersections[i + 1].distanceFromStart > d) {
+                polyline.vertices.push(hatchLine.start.subtract(this.angle.multiply(d)));
+              }
+            }
+            polyline.vertices.push(intersections[i + 1].position);
+            hatchLineSegments.push(polyline);
+          }
+        }
+      }
+
+      let joinedPolylines = Stitch.Optimize.joinPolylines(hatchLineSegments, 2 * this.density * pixelsPerUnit);
+      joinedPolylines = Stitch.Optimize.joinPolylines(joinedPolylines, Infinity);
+      let stitches = [];
+      for (let joinedPolyline of joinedPolylines) {
+        for (let vertex of joinedPolyline.vertices) {
+          stitches.push(vertex);
+        }
       }
       return stitches;
+
     }
   },
 
