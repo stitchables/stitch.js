@@ -1052,7 +1052,7 @@ Stitch.IO = {
     for (let i = 0; i < stitches.threads.length; i++) {
       for (let j = 0; j < stitches.threads[i].runs.length; j++) {
         for (let k = 0; k < stitches.threads[i].runs[j].length; k++) {
-          stitches.threads[i].runs[j][k] = stitches.threads[i].runs[j][k].subtract(new Stitch.Math.Vector(0.5 * stitches.dimensions.width, 0.5 * stitches.dimensions.height));
+          stitches.threads[i].runs[j][k] = stitches.threads[i].runs[j][k].subtract(new Stitch.Math.Vector(0.5 * stitches.dimensions.width * stitches.pixelsPerUnit, 0.5 * stitches.dimensions.height * stitches.pixelsPerUnit));
           stitches.threads[i].runs[j][k] = stitches.threads[i].runs[j][k].divide(stitches.pixelsPerUnit);
         }
       }
@@ -1159,10 +1159,10 @@ Stitch.IO = {
         this.data.push(`LA:${Stitch.IO.Writers.Utils.padRight(filename.split(".")[0], 16, " ")}\r`);
         this.data.push(`ST:${Stitch.IO.Writers.Utils.padLeft(stitches.stitchCount.toString(), 7, " ")}\r`);
         this.data.push(`CO:${Stitch.IO.Writers.Utils.padLeft((stitches.threads.length - 1).toString(), 3, " ")}\r`);
-        this.data.push(`+X:${Stitch.IO.Writers.Utils.padLeft(Math.ceil(0.1 * 0.5 * stitches.dimensions.width).toString(), 5, " ")}\r`);
-        this.data.push(`-X:${Stitch.IO.Writers.Utils.padLeft(Math.ceil(0.1 * 0.5 * stitches.dimensions.width).toString(), 5, " ")}\r`);
-        this.data.push(`+Y:${Stitch.IO.Writers.Utils.padLeft(Math.ceil(0.1 * 0.5 * stitches.dimensions.height).toString(), 5, " ")}\r`);
-        this.data.push(`-Y:${Stitch.IO.Writers.Utils.padLeft(Math.ceil(0.1 * 0.5 * stitches.dimensions.height).toString(), 5, " ")}\r`);
+        this.data.push(`+X:${Stitch.IO.Writers.Utils.padLeft(Math.ceil(0.1 * 0.5 * stitches.dimensions.width * stitches.pixelsPerUnit).toString(), 5, " ")}\r`);
+        this.data.push(`-X:${Stitch.IO.Writers.Utils.padLeft(Math.ceil(0.1 * 0.5 * stitches.dimensions.width * stitches.pixelsPerUnit).toString(), 5, " ")}\r`);
+        this.data.push(`+Y:${Stitch.IO.Writers.Utils.padLeft(Math.ceil(0.1 * 0.5 * stitches.dimensions.height * stitches.pixelsPerUnit).toString(), 5, " ")}\r`);
+        this.data.push(`-Y:${Stitch.IO.Writers.Utils.padLeft(Math.ceil(0.1 * 0.5 * stitches.dimensions.height * stitches.pixelsPerUnit).toString(), 5, " ")}\r`);
         this.data.push('AX:+    0\r');
         this.data.push('AY:+    0\r');
         this.data.push('MX:+    0\r');
@@ -1179,9 +1179,10 @@ Stitch.IO = {
         let yy = 0;
         for (let i = 0; i < stitches.threads.length; i++) {
           if (i > 0) this.data.push(this.encodeRecord(0, 0, 'COLOR_CHANGE'));
-          for (let run of stitches.threads[i].runs) {
-            for (let j = 0; j < run.length; j++) {
-              let stitch = run[j];
+          for (let j = 0; j < stitches.threads[i].runs.length; j++) {
+            if (j > 0) this.data.push(this.encodeRecord(2, 2, 'JUMP'), this.encodeRecord(-4, -4, 'JUMP'), this.encodeRecord(2, 2, 'JUMP')); // trim
+            for (let k = 0; k < stitches.threads[i].runs[j].length; k++) {
+              let stitch = stitches.threads[i].runs[j][k];
               let x = 10 * stitch.x;
               let y = 10 * stitch.y;
               let dx = Math.round(x - xx);
@@ -1195,7 +1196,7 @@ Stitch.IO = {
                 let accy = 0;
                 let ddx = Math.round(dx * inc);
                 let ddy = Math.round(dy * inc);
-                for (let j = 0; j < steps - 1; j++) {
+                for (let n = 0; n < steps - 1; n++) {
                   this.data.push(this.encodeRecord(ddx, ddy, 'JUMP'));
                   accx += ddx;
                   accy += ddy;
@@ -1203,7 +1204,7 @@ Stitch.IO = {
                 dx -= accx;
                 dy -= accy;
               }
-              this.data.push(this.encodeRecord(dx, dy, j === 0 ? 'JUMP' : 'STITCH'));
+              this.data.push(this.encodeRecord(dx, dy, 'STITCH'));
             }
           }
         }

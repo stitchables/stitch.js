@@ -275,9 +275,9 @@
 
     let handleKeypress = function(e) {
       if (e.code === "KeyD") {
-        Stitch.IO.write(pattern, widthInput.value, heightInput.value, `svgToEmbroidery.dst`, patternOptions.minimumPathLength, patternOptions.maximumJoinDistance);
+        Stitch.IO.write(pattern, widthMmInput.value, heightMmInput.value, `svgToEmbroidery.dst`, patternOptions.minimumPathLength, patternOptions.maximumJoinDistance);
       } else if (e.code === "KeyP") {
-        Stitch.IO.write(pattern, widthInput.value, heightInput.value, `svgToEmbroidery.pes`, patternOptions.minimumPathLength, patternOptions.maximumJoinDistance);
+        Stitch.IO.write(pattern, widthMmInput.value, heightMmInput.value, `svgToEmbroidery.pes`, patternOptions.minimumPathLength, patternOptions.maximumJoinDistance);
       }
     }
 
