@@ -57,9 +57,9 @@ Stitch.Pattern = class {
         for (let i = t.runs.length - 1; i >= 0; i--) {
           let runLength = 0;
           for (let j = 1; j < t.runs[i].length; j++) {
-            runLength += t.runs[i][j - 1].distance(t.runs[i][j]) / pixelMultiplier;
+            runLength += t.runs[i][j - 1].distance(t.runs[i][j]);
           }
-          if (runLength < minimumPathLength) {
+          if (runLength < minimumPathLength * pixelsPerUnit) {
             t.runs.splice(i, 1);
           }
         }
@@ -70,7 +70,7 @@ Stitch.Pattern = class {
       for (let t of stitches.threads) {
         let polylines = [];
         for (let r of t.runs) polylines.push(Stitch.Math.Polyline.fromVectors(r));
-        let joinedPolylines = Stitch.Optimize.joinPolylines(polylines, maximumJoinDistance * pixelMultiplier);
+        let joinedPolylines = Stitch.Optimize.joinPolylines(polylines, maximumJoinDistance * pixelsPerUnit);
         t.runs = [];
         for (let joinedPolyline of joinedPolylines) {
           let run = [];
@@ -173,7 +173,7 @@ Stitch.Optimize = {
         else joinedPolylines[joinedPolylines.length - 1].vertices = joinedPolylines[joinedPolylines.length - 1].vertices.concat(nextPolyline.vertices);
       } else if (!done) {
         if (reverseFlag) nextPolyline.vertices.reverse();
-        // if (frontAppendFlag) joinedPolylines.reverse();
+        if (frontAppendFlag) joinedPolylines.reverse();
         joinedPolylines.push(nextPolyline);
       }
       if (done) break;
@@ -1197,7 +1197,7 @@ Stitch.IO = {
                 let ddx = Math.round(dx * inc);
                 let ddy = Math.round(dy * inc);
                 for (let n = 0; n < steps - 1; n++) {
-                  this.data.push(this.encodeRecord(ddx, ddy, 'JUMP'));
+                  this.data.push(this.encodeRecord(ddx, ddy, k === 0 ? 'JUMP' : 'STITCH'));
                   accx += ddx;
                   accy += ddy;
                 }
@@ -1210,7 +1210,7 @@ Stitch.IO = {
         }
       }
     },
-    PES: class {
+    PES: class { // Truncated PES v.1 - https://edutechwiki.unige.ch/en/Embroidery_format_PES
       constructor() { this.data = []; }
       writeString(string) { this.data.push(string); }
       writeBytes(bytes) { this.data.push(bytes); }
@@ -1228,13 +1228,11 @@ Stitch.IO = {
         this.writeBytes(new Uint8Array([0x26]));
         this.writeBytes(new Uint8Array(new Array(12).fill(0x20)));
         this.writeInt(stitchPattern.threads.length - 1, 1, 'L');
-
         // todo: implemenet color matching
         let colorList = [0x05, 0x38, 0x15];
         for (let i = 0; i < stitchPattern.threads.length; i++) {
           this.writeInt(colorList[i % 3], 1, 'L');
         }
-
         this.writeBytes(new Uint8Array(new Array(463 - stitchPattern.threads.length).fill(0x20)));
         this.writeBytes(new Uint8Array([0x00, 0x00]));
         let graphicsOffsetValue = new Uint8Array(3);
@@ -1242,12 +1240,12 @@ Stitch.IO = {
         this.writeBytes(new Uint8Array([0x31]));
         this.writeBytes(new Uint8Array([0xFF]));
         this.writeBytes(new Uint8Array([0xF0]));
-        this.writeInt(2 * Math.ceil(10 * 0.5 * stitchPattern.width), 2, 'L');
-        this.writeInt(2 * Math.ceil(10 * 0.5 * stitchPattern.height), 2, 'L');
+        this.writeInt(2 * Math.ceil(10 * 0.5 * stitchPattern.dimensions.width * stitchPattern.pixelsPerUnit), 2, 'L');
+        this.writeInt(2 * Math.ceil(10 * 0.5 * stitchPattern.dimensions.height * stitchPattern.pixelsPerUnit), 2, 'L');
         this.writeBytes(new Uint8Array([0xE0, 0x01]));
         this.writeBytes(new Uint8Array([0xB0, 0x01]));
-        this.writeInt(0x9000 + Math.ceil(10 * 0.5 * stitchPattern.width), 2, 'B');
-        this.writeInt(0x9000 + Math.ceil(10 * 0.5 * stitchPattern.height), 2, 'B');
+        this.writeInt(0x9000 + Math.ceil(10 * 0.5 * stitchPattern.dimensions.width * stitchPattern.pixelsPerUnit), 2, 'B');
+        this.writeInt(0x9000 + Math.ceil(10 * 0.5 * stitchPattern.dimensions.height * stitchPattern.pixelsPerUnit), 2, 'B');
         let stitchEncodingByteCount = this.encodeStitches(stitchPattern);
         let graphicsOffsetBytes = Stitch.IO.Writers.Utils.integerToBinary(20 + stitchEncodingByteCount, 3, 'L');
         for (let i = 0; i < 3; i++) graphicsOffsetValue[i] = graphicsOffsetBytes[i];
