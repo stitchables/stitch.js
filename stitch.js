@@ -15,15 +15,16 @@ Stitch.Pattern = class {
       sigFigs: 5,
       namespace: "http://www.w3.org/2000/svg",
       minimumPathLength: 0,
-      maximumJoinDistance: 0
+      maximumJoinDistance: 0,
+      maximumStitchesPerSquareMm: 0
     };
   }
-  addThread(red, green, blue) {
+  addThread(red = 0, green = 0, blue = 0) {
     let thread = new Stitch.Thread(red, green, blue);
     this.threads.push(thread);
     return thread;
   }
-  getStitches(width, height, pixelMultiplier = 3.78, minimumPathLength = 0, maximumJoinDistance = 0) {
+  getStitches(width, height, pixelMultiplier = 3.78, minimumPathLength = 0, maximumJoinDistance = 0, maximumStitchesPerSquareMm = 0) {
     let dimensions = width / height > this.width / this.height ? { width: (this.width / this.height) * height, height: height } : { width: width, height: (this.height / this.width) * width };
     let pixelsPerUnit = pixelMultiplier * this.width / dimensions.width;
     let stitches = {
@@ -50,6 +51,37 @@ Stitch.Pattern = class {
         thread.runs.push(run);
       }
       stitches.threads.push(thread);
+    }
+
+    if (maximumStitchesPerSquareMm > 0) {
+      let rangeSizeMm = 1;
+      let rangeSizePx = rangeSizeMm * pixelsPerUnit;
+      let boundingBox = new Stitch.Math.BoundingBox(
+        0.5 * (stitches.boundingBox.min.x + stitches.boundingBox.max.x),
+        0.5 * (stitches.boundingBox.min.y + stitches.boundingBox.max.y),
+        0.5 * (stitches.boundingBox.max.x - stitches.boundingBox.min.x),
+        0.5 * (stitches.boundingBox.max.y - stitches.boundingBox.min.y)
+      );
+      let quadtree = new Stitch.Math.Quadtree(boundingBox, 10);
+      for (let t of stitches.threads) {
+        let newRuns = [];
+        for (let r of t.runs) {
+          newRuns.push([]);
+          for (let s of r) {
+            let range = new Stitch.Math.BoundingBox(s.x, s.y, 0.5 * rangeSizePx, 0.5 * rangeSizePx);
+            let closeStitches = quadtree.query(range);
+            if (closeStitches.length / rangeSizeMm / rangeSizeMm >= maximumStitchesPerSquareMm) {
+              if (newRuns[newRuns.length - 1].length > 0) newRuns.push([]);
+              continue;
+            } else {
+              quadtree.insert(s.x, s.y);
+              newRuns[newRuns.length - 1].push(s);
+            }
+          }
+        }
+        newRuns.filter(r => r.length > 0);
+        t.runs = newRuns;
+      }
     }
 
     if (minimumPathLength > 0) {
@@ -88,7 +120,7 @@ Stitch.Pattern = class {
     if (options) {
       for (let [key, value] of Object.entries(this.defaultOptions)) if (!(key in options)) options[key] = value;
     } else options = this.defaultOptions;
-    let stitches = this.getStitches(width, height, options.pixelMultiplier, options.minimumPathLength, options.maximumJoinDistance);
+    let stitches = this.getStitches(width, height, options.pixelMultiplier, options.minimumPathLength, options.maximumJoinDistance, options.maximumStitchesPerSquareMm);
     let svg = document.createElementNS(options.namespace, "svg");
     svg.setAttribute("viewBox", `0 0 ${this.width} ${this.height}`);
     svg.setAttribute("width", `${stitches.dimensions.width}${options.units}`);
@@ -112,7 +144,7 @@ Stitch.Pattern = class {
             let circle = document.createElementNS(options.namespace, "circle");
             circle.setAttribute("cx", Number(stitch.x.toPrecision(options.sigFigs)));
             circle.setAttribute("cy", Number(stitch.y.toPrecision(options.sigFigs)));
-            circle.setAttribute("r", 0.5);
+            circle.setAttribute("r", 1);
             showStitchesGroup.appendChild(circle);
           }
         }
@@ -240,7 +272,7 @@ Stitch.Math = {
     distance(v) { return Math.sqrt((this.x - v.x) * (this.x - v.x) + (this.y - v.y) * (this.y - v.y)); }
     heading() { return Math.atan2(this.y, this.x); }
     magnitude() { return Math.sqrt(this.x * this.x + this.y * this.y); }
-    normalized() { return this.divide(this.magnitude()); }
+    normalized() { return (this.magnitude() > 0) ? this.divide(this.magnitude()) : Stitch.Math.Vector.fromAngle(0); }
     squaredLength() { return this.x * this.x + this.y * this.y; }
     length() { return Math.sqrt(this.squaredLength); }
   },
@@ -462,51 +494,106 @@ Stitch.Math = {
   },
 
   BoundingBox: class {
-    constructor(x, y, w, h) { [this.x, this.y, this.w, this.h] = [x, y, w, h]; }
-    contains(x, y) { return (x >= this.x - this.w && x <  this.x + this.w && y >= this.y - this.h && y <  this.y + this.h); }
-    intersect(bb) { return !(bb.x - bb.w > this.x + this.w || bb.x + bb.w < this.x - this.w || bb.y - bb.h > this.y + this.h || bb.y + bb.h < this.y - this.h); }
+    constructor(cx, cy, hw, hh) { [this.cx, this.cy, this.hw, this.hh] = [cx, cy, hw, hh]; }
+    contains(x, y) {
+      return (
+        x >= this.cx - this.hw &&
+        x < this.cx + this.hw &&
+        y >= this.cy - this.hh &&
+        y < this.cy + this.hh
+      );
+    }
+    intersects(bb) {
+      return !(
+        bb.cx - bb.hw > this.cx + this.hw ||
+        bb.cx + bb.hw < this.cx - this.hw ||
+        bb.cy - bb.hh > this.cy + this.hh ||
+        bb.cy + bb.hh < this.cy - this.hh
+      );
+    }
   },
 
   Quadtree: class {
     constructor(boundingBox, capacity) {
       this.boundingBox = boundingBox;
       this.capacity = capacity;
-      this.entities = [];
-      this.isSubdivided = false;
+      this.points = [];
+      this.divided = false;
     }
     subdivide() {
-      let [x, y, hw, hh] = [this.boundingBox.x, this.boundingBox.y, 0.5 * this.boundingBox.w, 0.5 * this.boundingBox.h];
-      this.ne = new Stitch.Math.Quadtree(new Stitch.Math.BoundingBox(x + hw, y - hh, hw, hh), this.capacity);
-      this.nw = new Stitch.Math.Quadtree(new Stitch.Math.BoundingBox(x - hw, y - hh, hw, hh), this.capacity);
-      this.se = new Stitch.Math.Quadtree(new Stitch.Math.BoundingBox(x + hw, y + hh, hw, hh), this.capacity);
-      this.sw = new Stitch.Math.Quadtree(new Stitch.Math.BoundingBox(x - hw, y + hh, hw, hh), this.capacity);
-      this.isSubdivided = true;
+      let [x, y, w, h] = [this.boundingBox.cx, this.boundingBox.cy, this.boundingBox.hw, this.boundingBox.hh];
+      this.ne = new Stitch.Math.Quadtree(new Stitch.Math.BoundingBox(x + 0.5 * w, y - 0.5 * h, 0.5 * w, 0.5 * h), this.capacity);
+      this.nw = new Stitch.Math.Quadtree(new Stitch.Math.BoundingBox(x - 0.5 * w, y - 0.5 * h, 0.5 * w, 0.5 * h), this.capacity);
+      this.se = new Stitch.Math.Quadtree(new Stitch.Math.BoundingBox(x + 0.5 * w, y + 0.5 * h, 0.5 * w, 0.5 * h), this.capacity);
+      this.sw = new Stitch.Math.Quadtree(new Stitch.Math.BoundingBox(x - 0.5 * w, y + 0.5 * h, 0.5 * w, 0.5 * h), this.capacity);
+      this.divided = true;
     }
-    insert(x, y, object) {
+    insert(x, y, object = {}) {
       if (!this.boundingBox.contains(x, y)) return false;
-      if (this.entities.length < this.capacity) {
-        this.entities.push({ x, y, object });
+      if (this.points.length < this.capacity) {
+        this.points.push({ x, y, object });
         return true;
-      } else {
-        if (!this.isSubdivided) this.subdivide();
-        if (this.ne.insert(x, y, object)) return true;
-        if (this.nw.insert(x, y, object)) return true;
-        if (this.se.insert(x, y, object)) return true;
-        if (this.sw.insert(x, y, object)) return true;
       }
+      if (!this.divided) this.subdivide();
+      if (this.ne.insert(x, y, object)) return true;
+      if (this.nw.insert(x, y, object)) return true;
+      if (this.se.insert(x, y, object)) return true;
+      if (this.sw.insert(x, y, object)) return true;
+      return false;
     }
     query(boundingBox, result = []) {
-      if (!this.boundingBox.intersect(boundingBox)) return;
-      for (let entity of this.entities) {
-        if (boundingBox.contains(entity.x, entity.y)) result.push(entity);
+      if (!this.boundingBox.intersects(boundingBox)) return result;
+      for (let point of this.points) {
+        if (boundingBox.contains(point.x, point.y)) result.push(point);
       }
-      if (this.isSubdivided) {
+      if (this.divided) {
         this.nw.query(boundingBox, result);
         this.ne.query(boundingBox, result);
         this.sw.query(boundingBox, result);
         this.se.query(boundingBox, result);
       }
       return result;
+    }
+  },
+
+  NewGraph: class {
+    constructor() {
+      this.vertices = {};
+      this.adjacency = {};
+      this.edges = {};
+    }
+    copy() {
+      let copy = new Stitch.Math.NewGraph();
+      copy.vertices = structuredClone(this.vertices);
+      copy.adjacency = structuredClone(this.adjacency);
+      copy.edges = structuredClone(this.edges);
+      return copy;
+    }
+    addVertex(id, properties = {}) {
+      this.vertices[id] = properties;
+      this.adjacency[id] = [];
+    }
+    addEdge(id1, id2, properties = {}) {
+      let edgeId = Object.keys(this.edges).length;
+      this.adjacency[id1].push({ id: edgeId, to: id2 });
+      this.adjacency[id2].push({ id: edgeId, to: id1 });
+      this.edges[edgeId] = { from: id1, to: id2, properties };
+    }
+    removeEdge(edgeId) {
+      let edge = this.edges[edgeId];
+      for (let i = 0; i < this.adjacency[edge.from].length; i++) {
+        if (this.adjacency[edge.from][i].id === edgeId) {
+          this.adjacency[edge.from].splice(i, 1);
+          break;
+        }
+      }
+      for (let i = 0; i < this.adjacency[edge.to].length; i++) {
+        if (this.adjacency[edge.to][i].id === edgeId) {
+          this.adjacency[edge.to].splice(i, 1);
+          break;
+        }
+      }
+      delete this.edges[edgeId];
     }
   },
 
@@ -1046,8 +1133,8 @@ Stitch.CSG = {
 };
 
 Stitch.IO = {
-  write: function(pattern, widthMM, heightMM, filename, minimumPathLength = 0, maximumJoinDistance = 0) {
-    let stitches = pattern.getStitches(widthMM, heightMM, 1, minimumPathLength, maximumJoinDistance);
+  write: function(pattern, widthMM, heightMM, filename, minimumPathLength = 0, maximumJoinDistance = 0, maximumStitchesPerSquareMm = 0) {
+    let stitches = pattern.getStitches(widthMM, heightMM, 1, minimumPathLength, maximumJoinDistance, maximumStitchesPerSquareMm);
     // center the pattern and convert units to millimeters
     for (let i = 0; i < stitches.threads.length; i++) {
       for (let j = 0; j < stitches.threads[i].runs.length; j++) {
@@ -1612,317 +1699,226 @@ Stitch.Runs = {
     }
   },
 
-  // work in progress - not finished yet...
-  ComplexFill: class {
-    constructor(stitchLength, density, angle, polyline, contours = []) {
-      this.stitchLength = stitchLength;
-      this.density = density;
+  // https://github.com/inkstitch/inkstitch/blob/main/lib/stitches/auto_fill.py
+  AutoFill: class {
+    constructor(shape, angle, rowSpacingMm, stitchSpacingMm, startPosition = null, endPosition = null) {
+      this.shape = shape;
       this.angle = angle;
-      this.polyline = polyline;
-      this.contours = contours;
-      this.boundingBox = this.polyline.getBoundingBox();
-      [this.splitShapes, this.tour] = this.splitPolygon();
-      this.filledPolylines = [];
+      this.rowSpacingMm = rowSpacingMm;
+      this.stitchSpacingMm = stitchSpacingMm;
+      this.startPosition = startPosition;
+      this.endPosition = endPosition;
+      this.direction = Stitch.Math.Vector.fromAngle(this.angle);
+      this.normal = Stitch.Math.Vector.fromAngle(this.angle + 0.5 * Math.PI);
+      this.bounds = { min: new Stitch.Math.Vector(Infinity, Infinity), max: new Stitch.Math.Vector(-Infinity, -Infinity) };
+      for (let polyline of this.shape) {
+        let bounds = polyline.getBoundingBox();
+        if (bounds.min.x < this.bounds.min.x) this.bounds.min.x = bounds.min.x;
+        if (bounds.max.x > this.bounds.max.x) this.bounds.max.x = bounds.max.x;
+        if (bounds.min.y < this.bounds.min.y) this.bounds.min.y = bounds.min.y;
+        if (bounds.max.y > this.bounds.max.y) this.bounds.max.y = bounds.max.y;
+      }
+      this.center = this.bounds.min.add(this.bounds.max).multiply(0.5);
+      this.distance = this.center.distance(this.bounds.min);
     }
-    createConnectedPolygon(polylines, maxCheckDist) {
-      let connectedPolygon = [];
-      for (let i = 0; i < polylines.length; i++) {
-        let firstEdge;
-        for (let j = 0; j < polylines[i].vertices.length; j++) {
-          let edge = { position: polylines[i].vertices[j], fromToPairs: [] };
-          if (j === 0) {
-            edge.fromToPairs.push({ from: null, to: null });
-            firstEdge = edge;
-          } else {
-            let prevEdge = connectedPolygon[connectedPolygon.length - 1];
-            edge.fromToPairs.push({ from: prevEdge, to: null });
-            prevEdge.fromToPairs[0].to = edge;
-            if (j === polylines[i].vertices.length - 1) {
-              firstEdge.fromToPairs[0].from = edge;
-              edge.fromToPairs[0].to = firstEdge;
+    getStitches(pixelsPerMm) {
+      let rows = this.getRows(pixelsPerMm);
+      let fillStitchGraph = this.getFillStitchGraph(rows);
+      let travelGraph = this.getTravelGraph(fillStitchGraph);
+      let stitchPath = this.getStitchPath(fillStitchGraph, travelGraph);
+      return this.getStitchesFromPath(stitchPath, fillStitchGraph, pixelsPerMm);;
+    }
+    getRows(pixelsPerMm) {
+      let rows = [];
+      for (let offset = -this.distance; offset <= this.distance; offset += this.rowSpacingMm * pixelsPerMm) {
+        let intersections = [];
+        let c = this.center.add(this.normal.multiply(offset));
+        let dc = this.direction.multiply(this.distance);
+        let [p, q] = [c.add(dc), c.subtract(dc)];
+        for (let [shapeIndex, polyline] of this.shape.entries()) {
+          let sumPolylineDistance = 0;
+          for (let i = 0; i < polyline.vertices.length; i++) {
+            let s = polyline.vertices[i];
+            let t = polyline.vertices[(i + 1) % polyline.vertices.length];
+            let intersection = Stitch.Math.Utils.lineSegmentIntersection(p, q, s, t);
+            if (intersection) {
+              intersections.push({
+                shapeIndex: shapeIndex,
+                position: intersection,
+                rowIndex: rows.length,
+                rowStart: p,
+                rowEnd: q,
+                rowDistance: intersection.distance(p),
+                polylineDistance: sumPolylineDistance + s.distance(intersection)
+              });
             }
+            sumPolylineDistance += s.distance(t);
           }
-          connectedPolygon.push(edge);
+        }
+        if (intersections.length > 0 && intersections.length % 2 === 0) {
+          intersections.sort((a, b) => { return a.rowDistance > b.rowDistance ? 1 : -1; });
+          let row = [];
+          for (let i = 0; i < intersections.length; i += 2) row.push([intersections[i], intersections[i + 1]]);
+          rows.push(row);
         }
       }
-      let extremeEdges = this.getExtremeEdges(connectedPolygon, maxCheckDist);
-      return [connectedPolygon, extremeEdges];
+      return rows;
     }
-    getExtremeEdges(connectedPolygon, maxCheckDist) {
-      let extremeEdges = [];
-      for (let edge of connectedPolygon) {
-        let [prev, curr, next] = [edge.fromToPairs[0].from.position, edge.position, edge.fromToPairs[0].to.position];
-        let [n1, n2] = [prev.subtract(curr).normalized(), next.subtract(curr).normalized()];
-        let a = Stitch.Math.Vector.fromAngle(this.angle);
-        if (n1.cross(n2) > 0 && Math.sign(a.cross(n1)) === Math.sign(a.cross(n2))) {
-          extremeEdges.push(edge);
-          edge.isExtreme = true;
+    getFillStitchGraph(rows) {
+      let fillStitchGraph = new Stitch.Math.NewGraph();
+      for (let i = 0; i < rows.length; i++) {
+        for (let j = 0; j < rows[i].length; j++) {
+          fillStitchGraph.addVertex(`${i},${j},0`, rows[i][j][0]);
+          fillStitchGraph.addVertex(`${i},${j},1`, rows[i][j][1]);
+          fillStitchGraph.addEdge(`${i},${j},0`, `${i},${j},1`, { key: "segment" });
+        }
+      }
+      for (let i = 0; i < this.shape.length; i++) {
+        let nodes = Object.entries(fillStitchGraph.vertices)
+          .filter(([key, value]) => value.shapeIndex === i)
+          .sort((a, b) => a[1].polylineDistance > b[1].polylineDistance ? 1 : -1);
+        for (let j = 0; j < nodes.length; j++) {
+          fillStitchGraph.addEdge(nodes[j][0], nodes[(j + 1) % nodes.length][0], { key: "outline" });
+          if (j % 2 === 0) {
+            fillStitchGraph.addEdge(nodes[j][0], nodes[(j + 1) % nodes.length][0], { key: "extra" });
+          }
+        }
+      }
+      return fillStitchGraph;
+    }
+    getTravelGraph(fillStitchGraph) {
+      let travelGraph = new Stitch.Math.NewGraph();
+      for (let [id, properties] of Object.entries(fillStitchGraph.vertices)) {
+        travelGraph.addVertex(id, properties);
+      }
+
+      for (let [edgeId, edge] of Object.entries(fillStitchGraph.edges)) {
+        if (edge.properties.key === "outline") {
+          travelGraph.addEdge(edge.from, edge.to, { key: "outline" });
+        }
+      }
+
+      return travelGraph;
+    }
+    getStitchPath(fillStitchGraph, travelGraph) {
+      let g = fillStitchGraph.copy();
+      let startId = Object.keys(g.vertices)[0];
+      let endId = startId;
+      if (this.startPosition !== null || this.endPosition !== null) {
+        let [minStartDistance, minEndDistance] = [Infinity, Infinity];
+        for (let [id, v] of Object.entries(g.vertices)) {
+          let dStart = (this.startPosition === null) ? Infinity : this.startPosition.distance(v.position);
+          let dEnd = (this.endPosition === null) ? Infinity : this.endPosition.distance(v.position);
+          if (this.startPosition !== null && dStart < minStartDistance) {
+            minStartDistance = dStart;
+            startId = id;
+          }
+          if (this.endPosition !== null && dEnd < minEndDistance) {
+            minEndDistance = dEnd;
+            endId = id;
+          }
+        }
+      }
+      let path = [];
+      let vertexStack = [[endId, false]];
+      let lastVertexId = false;
+      let lastVertexKey = false;
+      while (vertexStack.length > 0) {
+        let [currentVertexId, currentVertexKey] = vertexStack[vertexStack.length - 1];
+        if (g.adjacency[currentVertexId].length === 0) {
+          if (lastVertexId) {
+            path.push({ from: lastVertexId, to: currentVertexId, key: lastVertexKey });
+          }
+          [lastVertexId, lastVertexKey] = [currentVertexId, currentVertexKey];
+          vertexStack.pop();
         } else {
-          edge.isExtreme = false;
-        }
-      }
-      extremeEdges.sort((a, b) => {
-        let curr = a.position;
-        let pos = curr.add(new Stitch.Math.Vector(maxCheckDist * Math.cos(this.angle), maxCheckDist * Math.sin(this.angle)));
-        let neg = curr.subtract(new Stitch.Math.Vector(maxCheckDist * Math.cos(this.angle), maxCheckDist * Math.sin(this.angle)));
-        return Stitch.Math.Utils.isPointLeft(pos, neg, b.position) ? -1 : 1;
-      });
-      return extremeEdges;
-    }
-    splitPolygon() {
-
-      let maxCheckDist = this.boundingBox.center.distance(this.boundingBox.max);
-
-      let [connectedPolygon, extremeEdges] = this.createConnectedPolygon([this.polyline, ...this.contours], maxCheckDist);
-
-      // add the splits to the connected polygon
-      for (let extremeEdge of extremeEdges) {
-
-        let vPos = extremeEdge.position.add(Stitch.Math.Vector.fromAngle(this.angle).multiply(maxCheckDist));
-        let vNeg = extremeEdge.position.subtract(Stitch.Math.Vector.fromAngle(this.angle).multiply(maxCheckDist));
-
-        // get the closest intersection points on both sides of the edge
-        let minPosIntersection = null;
-        let minNegIntersection = null;
-        for (let edge of connectedPolygon) {
-          let posIntersection = Stitch.Math.Utils.lineSegmentIntersection(extremeEdge.position, vPos, edge.position, edge.fromToPairs[0].to.position);
-          if (posIntersection) {
-            let posDist = extremeEdge.position.distance(posIntersection);
-            if (posDist > 0.0001) {
-              if (!minPosIntersection) minPosIntersection = { edge: edge, intersection: posIntersection, distance: posDist };
-              else if (posDist < minPosIntersection.distance) minPosIntersection = { edge: edge, intersection: posIntersection, distance: posDist };
+          let edges = g.adjacency[currentVertexId];
+          let [edgeId, nextVertexId, nextVertexKey] = [edges[0].id, edges[0].to, g.edges[edges[0].id].properties.key];
+          for (let edge of edges) {
+            if (g.edges[edge.id].properties.key === "segment") {
+              [edgeId, nextVertexId, nextVertexKey] = [edge.id, edge.to, g.edges[edge.id].properties.key];
+              break;
             }
           }
-          let negIntersection = Stitch.Math.Utils.lineSegmentIntersection(extremeEdge.position, vNeg, edge.position, edge.fromToPairs[0].to.position);
-          if (negIntersection) {
-            let negDist = extremeEdge.position.distance(negIntersection);
-            if (negDist > 0.0001) {
-              if (!minNegIntersection) minNegIntersection = { edge: edge, intersection: negIntersection, distance: negDist };
-              else if (negDist < minNegIntersection.distance) minNegIntersection = { edge: edge, intersection: negIntersection, distance: negDist };
-            }
-          }
+          vertexStack.push([nextVertexId, nextVertexKey]);
+          g.removeEdge(edgeId);
         }
-
-        // check if it is a good intersection
-        if (minPosIntersection && minNegIntersection) {
-        
-          // add the new edges to the polygon
-          let newPosEdge = { position: minPosIntersection.intersection, fromToPairs: [], isExtreme: false };
-          let prevPosEdge = minPosIntersection.edge;
-          let nextPosEdge = minPosIntersection.edge.fromToPairs[0].to;
-          newPosEdge.fromToPairs.push({ from: prevPosEdge, to: nextPosEdge });
-          newPosEdge.fromToPairs.push({ from: extremeEdge, to: nextPosEdge });
-          newPosEdge.fromToPairs.push({ from: prevPosEdge, to: extremeEdge });
-          connectedPolygon.push(newPosEdge);
-          
-          let newNegEdge = { position: minNegIntersection.intersection, fromToPairs: [], isExtreme: false };
-          let prevNegEdge = minNegIntersection.edge;
-          let nextNegEdge = minNegIntersection.edge.fromToPairs[0].to;
-          newNegEdge.fromToPairs.push({ from: prevNegEdge, to: nextNegEdge });
-          newNegEdge.fromToPairs.push({ from: extremeEdge, to: nextNegEdge });
-          newNegEdge.fromToPairs.push({ from: prevNegEdge, to: extremeEdge });
-          connectedPolygon.push(newNegEdge);
-          
-          // reconnect the now broken edges
-          for (let pair of prevPosEdge.fromToPairs) if (pair.to === nextPosEdge) pair.to = newPosEdge;
-          for (let pair of nextPosEdge.fromToPairs) if (pair.from === prevPosEdge) pair.from = newPosEdge;
-          for (let pair of prevNegEdge.fromToPairs) if (pair.to === nextNegEdge) pair.to = newNegEdge;
-          for (let pair of nextNegEdge.fromToPairs) if (pair.from === prevNegEdge) pair.from = newNegEdge;
-          
-          // apply the to/from switching logic to the extremeEdge
-          if (Stitch.Math.Utils.isPointLeft(vPos, vNeg, extremeEdge.fromToPairs[0].from.position)) {
-            extremeEdge.fromToPairs.push({ from: newNegEdge, to: newPosEdge });
-            extremeEdge.fromToPairs.push({ from: newPosEdge, to: extremeEdge.fromToPairs[0].to });
-            extremeEdge.fromToPairs.push({ from: extremeEdge.fromToPairs[0].from, to: newNegEdge });
-          } else {
-            extremeEdge.fromToPairs.push({ from: newPosEdge, to: newNegEdge });
-            extremeEdge.fromToPairs.push({ from: newNegEdge, to: extremeEdge.fromToPairs[0].to });
-            extremeEdge.fromToPairs.push({ from: extremeEdge.fromToPairs[0].from, to: newPosEdge });
-          }
-          
-        }
-
+      }
+      if (startId !== endId) {
+        path.unshift({ from: startId, to: endId, key: "initial" })
       }
 
-      // need to fake stuff incase it is a simple shape
-      if (extremeEdges.length === 0) {
-        connectedPolygon[0].isExtreme = true;
-        connectedPolygon[0].fromToPairs.push(connectedPolygon[0].fromToPairs[0]);
-        extremeEdges.push(connectedPolygon[0]);
-      }
-
-      // console.log(extremeEdges[0]);
-      //   let collectedPolygons = [];
-      //   let extremeEdge = extremeEdges[0];
-      //   for (let i = 1; i < extremeEdge.fromToPairs.length; i++) {
-      //     let collectedPolygon = [extremeEdge];
-      //     let polyline = new Stitch.Math.Polyline(true);
-      //     polyline.addVertex(extremeEdge.position.x, extremeEdge.position.y);
-      //     let polygonExtremeEdges = [];
-      //     let [prevEdge, currEdge, nextEdge] = [extremeEdge.fromToPairs[i].from, extremeEdge, extremeEdge.fromToPairs[i].to];
-      //     let [topExtremeFound, bottomExtremeFound] = [false, false];
-      //     do {
-
-      //       // decide if extreme edge is top or bottom of shape
-      //       if (currEdge.isExtreme) {
-      //         let vPos = currEdge.position.add(Stitch.Math.Vector.fromAngle(this.angle));
-      //         let vNeg = currEdge.position.subtract(Stitch.Math.Vector.fromAngle(this.angle));
-      //         if (Stitch.Math.Utils.isPointLeft(vPos, vNeg, prevEdge.position)) {
-      //           polygonExtremeEdges.push({ edge: currEdge, isTop: true });
-      //         } else {
-      //           polygonExtremeEdges.push({ edge: currEdge, isTop: false });
-      //         }
-      //       }
-
-      //       prevEdge = currEdge;
-      //       currEdge = nextEdge;
-      //       nextEdge = currEdge.fromToPairs[0].to;
-      //       if (currEdge.fromToPairs.length > 0) {
-      //         let possibleNextEdges = currEdge.fromToPairs.slice(1).filter(e => e.from !== prevEdge);
-      //         console.log(possibleNextEdges);
-      //         for (let j = 1; j < currEdge.fromToPairs.length; j++) {
-      //           if (currEdge.fromToPairs[j].from === prevEdge) {
-      //             nextEdge = currEdge.fromToPairs[j].to;
-      //             currEdge.fromToPairs.splice(j, 1);
-      //             break;
-      //           }
-      //         }
-      //       }
-      //       collectedPolygon.push(currEdge);
-      //       polyline.addVertex(currEdge.position.x, currEdge.position.y);
-
-      //     } while (nextEdge !== extremeEdge);
-      //     collectedPolygons.push({ edges: collectedPolygon, polyline, centroid: polyline.getCentroid(), extremeEdges: polygonExtremeEdges });
-      //   }
-      //   console.log(collectedPolygons);
-
-      // collect the polygons
-      let collectedPolygons = [];
-      for (let extremeEdge of extremeEdges) {
-        for (let i = 1; i < extremeEdge.fromToPairs.length; i++) {
-          let collectedPolygon = [extremeEdge];
-          let polyline = new Stitch.Math.Polyline(true);
-          polyline.addVertex(extremeEdge.position.x, extremeEdge.position.y);
-          let polygonExtremeEdges = [];
-          let [prevEdge, currEdge, nextEdge] = [extremeEdge.fromToPairs[i].from, extremeEdge, extremeEdge.fromToPairs[i].to];
-          do {
-            // decide if extreme edge is top or bottom of shape
-            if (currEdge.isExtreme) {
-              let vPos = currEdge.position.add(Stitch.Math.Vector.fromAngle(this.angle));
-              let vNeg = currEdge.position.subtract(Stitch.Math.Vector.fromAngle(this.angle));
-              if (Stitch.Math.Utils.isPointLeft(vPos, vNeg, prevEdge.position)) {
-                polygonExtremeEdges.push({ edge: currEdge, isTop: true });
-              } else {
-                polygonExtremeEdges.push({ edge: currEdge, isTop: false });
+      // collapse sequential edges that fall on the same outline
+      let [newPath, startRunId] = [[], null];
+      for (let edge of path) {
+        if (edge.key === "segment") {
+          if (startRunId !== null) {
+            let graphHasEdge = false;
+            for (let e of fillStitchGraph.adjacency[startRunId]) {
+              if (e.to === edge.from) {
+                graphHasEdge = true;
+                break;
               }
             }
-            prevEdge = currEdge;
-            currEdge = nextEdge;
-            nextEdge = currEdge.fromToPairs[0].to;
-            if (currEdge.fromToPairs.length > 0) {
-              for (let j = 1; j < currEdge.fromToPairs.length; j++) {
-                if (currEdge.fromToPairs[j].from === prevEdge) {
-                  nextEdge = currEdge.fromToPairs[j].to;
-                  currEdge.fromToPairs.splice(j, 1);
-                  break;
-                }
-              }
+            if (graphHasEdge) {
+              newPath.push({ from: startRunId, to: edge.from, key: "outline" });
+            } else {
+              newPath.push({ from: startRunId, to: edge.from, key: "collapsed" });
             }
-            collectedPolygon.push(currEdge);
-            polyline.addVertex(currEdge.position.x, currEdge.position.y);
-          } while (nextEdge !== extremeEdge);
-          collectedPolygons.push({ edges: collectedPolygon, polyline, centroid: polyline.getCentroid(), extremeEdges: polygonExtremeEdges });
-        }
-      }
-
-      // build the graph and get the tour
-      let graph = new Stitch.Math.Graph();
-      for (let i = 0; i < collectedPolygons.length; i++) graph.addVertex(i);
-      for (let i = 0; i < collectedPolygons.length; i++) {
-        for (let j = i + 1; j < collectedPolygons.length; j++) {
-          let minDistance = Infinity;
-          for (let k = 0; k < collectedPolygons[i].extremeEdges.length; k++) {
-            for (let l = 0; l < collectedPolygons[j].extremeEdges.length; l++) {
-              let distance = collectedPolygons[i].extremeEdges[k].edge.position.distance(collectedPolygons[j].extremeEdges[l].edge.position);
-              if (distance < minDistance) minDistance = distance;
-            }
+            startRunId = null;
           }
-          for (let k = 0; k < collectedPolygons[i].edges.length; k++) {
-            let currStart = collectedPolygons[i].edges[k];
-            let currEnd = collectedPolygons[i].edges[(k + 1) % collectedPolygons[i].edges.length];
-            for (let l = 0; l < collectedPolygons[j].edges.length; l++) {
-              let nextStart = collectedPolygons[j].edges[l];
-              let nextEnd = collectedPolygons[j].edges[(l + 1) % collectedPolygons[j].edges.length];
-              if ((currStart === nextStart && currEnd === nextEnd) || (currStart === nextEnd && currEnd === nextStart)) {
-                graph.addEdge(i, j, minDistance);
-              }
-            }
-          }
-        }
-      }
-      let tour = graph.tsp().path;
-
-      // only fill if going through vertex last time, remove any unfilled stops from begining of tour
-      let augmentedTour = [];
-      for (let i = 0; i < tour.length; i++) {
-        let lastIndex = i;
-        for (let j = i + 1; j < tour.length; j++) if (tour[i] === tour[j]) lastIndex = j;
-        if (lastIndex === i || augmentedTour.length > 0) {
-          augmentedTour.push({vertex: tour[i], isFilled: (i === lastIndex) ? true : false });
-        }
-      }
-
-      // decide if path through shape is top to bottom or bottom to top
-      for (let i = 0; i < augmentedTour.length; i++) {
-        if (i < augmentedTour.length - 1) {
-          let vPos = collectedPolygons[augmentedTour[i].vertex].centroid.add(Stitch.Math.Vector.fromAngle(this.angle));
-          let vNeg = collectedPolygons[augmentedTour[i].vertex].centroid.subtract(Stitch.Math.Vector.fromAngle(this.angle));
-          if (Stitch.Math.Utils.isPointLeft(vPos, vNeg, collectedPolygons[augmentedTour[i + 1].vertex].centroid)) {
-            augmentedTour[i].isFlipped = true;
-          } else {
-            augmentedTour[i].isFlipped = false;
-          }
+          newPath.push(edge);
         } else {
-
-        }
-      }
-
-      return [collectedPolygons, augmentedTour];
-
-    }
-    getFillLines(pixelsPerUnit) {
-      let [u, v] = [Stitch.Math.Vector.fromAngle(this.angle), Stitch.Math.Vector.fromAngle(this.angle + 0.5 * Math.PI)];
-      let radius = this.boundingBox.center.distance(this.boundingBox.max);
-      let baseLine = { start: this.boundingBox.center.add(u.multiply(radius)), end: this.boundingBox.center.add(u.multiply(-radius)) };
-      let spacing = pixelsPerUnit * this.density;
-      let countLines = Math.ceil(radius / spacing);
-      let lines = [];
-      for (let i = -countLines; i <= countLines; i++) {
-        let offset = v.multiply(i * spacing);
-        lines.push({ start: baseLine.start.add(offset), end: baseLine.end.add(offset) });
-      }
-      let fillLines = [];
-      for (let shape of this.splitShapes) {
-        let temp = { shape: shape.edges, polyline: shape.polyline, fillLines: [] };
-        for (let i = 0; i < lines.length; i++) {
-          let line = lines[i];
-          let intersections = [];
-          for (let i = 0; i < shape.edges.length; i++) {
-            let curr = shape.edges[i].position;
-            let next = shape.edges[(i + 1) % shape.edges.length].position;
-            let intersection = Stitch.Math.Utils.lineSegmentIntersection(line.start, line.end, curr, next);
-            if (intersection) intersections.push(intersection);
-          }
-          if (intersections.length === 2) {
-            intersections.sort((a, b) => { return line.start.distance(a) > line.start.distance(b) ? 1 : -1; });
-            temp.fillLines.push({ index: i, lineStart: line.start, lineEnd: line.end, intersectionStart: intersections[0], intersectionEnd: intersections[1] });
+          if (startRunId === null) {
+            startRunId = edge.from;
           }
         }
-        fillLines.push(temp);
       }
-      return fillLines;
+      if (startRunId !== null && startRunId !== path[path.length - 1].to) {
+        newPath.push({ from: startRunId, to: edge.to, key: "collapsed" })
+      }
+
+      return newPath;
     }
-    findPath(from, to, maxStepSize = 10, minStepSize = 1) {
+    getStitchesFromPath(stitchPath, fillStitchGraph, pixelsPerMm) {
+      let stitches = [];
+      if (stitchPath[0].key !== "segment") {
+        stitches.push(fillStitchGraph.vertices[stitchPath[0].from].position);
+      }
+      for (let [i, edge] of stitchPath.entries()) {
+        let [from, to] = [fillStitchGraph.vertices[edge.from], fillStitchGraph.vertices[edge.to]];
+        if (edge.key === "segment") {
+          stitches = stitches.concat(this.stitchRow(from, to, pixelsPerMm));
+        } else {
+          stitches = stitches.concat(this.findPath(from.position, to.position, 0.5 * this.stitchSpacingMm * pixelsPerMm, 0.1 * this.stitchSpacingMm * pixelsPerMm));
+        }
+      }
+      return stitches;
+    }
+    stitchRow(from, to, pixelsPerMm) {
+      let rowStitches = [];
+      let offset = Stitch.Math.Utils.map(from.rowIndex % 2, 0, 2, 0, this.stitchSpacingMm * pixelsPerMm);
+      let maxDist = to.rowStart.distance(to.rowEnd);
+      let spacing = this.stitchSpacingMm * pixelsPerMm;
+      let minD = Math.min(from.rowDistance, to.rowDistance);
+      let maxD = Math.max(from.rowDistance, to.rowDistance);
+      for (let d = offset; d < maxDist; d += spacing) {
+        if (d > minD && d < maxD) {
+          let lerp = to.rowStart.lerp(to.rowEnd, d / maxDist);
+          if (
+            from.position.distance(lerp) >= 0.25 * this.stitchSpacingMm * pixelsPerMm &&
+            to.position.distance(lerp) >= 0.25 * this.stitchSpacingMm * pixelsPerMm
+          ) {
+            rowStitches.push(lerp);
+          }
+        }
+      }
+      if (from.rowDistance > to.rowDistance) {
+        rowStitches.reverse();
+      }
+      return rowStitches;
+    }
+    findPath(from, to, maxStepSize, minStepSize) {
       let queue = [[from]];
       let visited = new Set();
       while (queue.length > 0) {
@@ -1941,23 +1937,28 @@ Stitch.Runs = {
             new Stitch.Math.Vector(current.x + maxStepSize, current.y - maxStepSize),
             new Stitch.Math.Vector(current.x - maxStepSize, current.y + maxStepSize)
           ];
+          // let neighbors = [];
+          // for (let i = 0; i < 20; i++) {
+          //   neighbors.push(current.add(Stitch.Math.Vector.fromAngle(Stitch.Math.Utils.map(i, 0, 20, 0, 2 * Math.PI)).multiply(maxStepSize)));
+          // }
           for (const neighbor of neighbors) {
-            if (this.polyline.containsPoint(neighbor)) {
+            if (this.shape[0].containsPoint(neighbor)) {
               let checkContours = true;
-              for (let contour of this.contours) {
+              for (let i = 1; i < this.shape.length; i++) {
+                let contour = this.shape[i];
                 if (contour.containsPoint(neighbor)) {
                   checkContours = false;
                   break;
                 }
               }
               let checkFilled = true;
-              for (let i = 0; i < this.filledPolylines.length; i++) {
-                let polyline = this.filledPolylines[i];
-                if (polyline.containsPoint(neighbor)) {
-                  checkFilled = false;
-                  break;
-                }
-              }
+              // for (let i = 0; i < this.filledPolylines.length; i++) {
+              //   let polyline = this.filledPolylines[i];
+              //   if (polyline.containsPoint(neighbor)) {
+              //     checkFilled = false;
+              //     break;
+              //   }
+              // }
               if (checkContours && checkFilled) {
                 let newPath = [...path, neighbor];
                 queue.push(newPath);
@@ -1970,67 +1971,17 @@ Stitch.Runs = {
       console.log("no path found");
       return [];
     }
+  },
+  MultiAutoFill: class {
+    constructor(autoFills) { this.autoFills = autoFills; }
     getStitches(pixelsPerUnit) {
-      this.filledPolylines = [];
       let stitches = [];
-      let fillLines = this.getFillLines(pixelsPerUnit);
-      for (let i = 0; i < this.tour.length; i++) {
-        if (this.tour[i].isFilled) {
-          let lines = fillLines[this.tour[i].vertex].fillLines;
-          let fill = [];
-          for (let j = 0; j < lines.length; j++) {
-            let line = lines[this.tour[i].isFlipped ? lines.length - 1 - j : j];
-            let distanceToStart = line.lineStart.distance(line.intersectionStart);
-            let distanceToEnd = line.lineStart.distance(line.intersectionEnd);
-            let rowStitches = [line.intersectionStart];
-            for (let d = (line.index % 2 === 0) ? 0 : 0.5 * pixelsPerUnit * this.stitchLength; d < line.lineStart.distance(line.lineEnd); d += pixelsPerUnit * this.stitchLength) {
-              if (d > distanceToStart && d < distanceToEnd) {
-                let stitch = line.lineStart.subtract(Stitch.Math.Vector.fromAngle(this.angle).multiply(d));
-                if (stitch.distance(rowStitches[rowStitches.length - 1]) > 0.5 * pixelsPerUnit * this.stitchLength) {
-                  rowStitches.push(stitch);
-                }
-              }
-            }
-            if (line.intersectionEnd.distance(rowStitches[rowStitches.length - 1]) < 0.5 * pixelsPerUnit * this.stitchLength) rowStitches.pop();
-            rowStitches.push(line.intersectionEnd);
-            if (line.index % 2 === 1) rowStitches.reverse();
-            fill = fill.concat(rowStitches);
-          }
-          if (i > 0 && stitches.length > 0 && fill.length > 0) {
-            // let closestVertex = new Stitch.Math.Vector(Infinity, Infinity);
-            // for (let j = i; j < this.tour.length; j++) {
-            //   if (this.tour[j].isFilled) {
-            //     let vertex = fillLines[this.tour[j].vertex].polyline.getClosestVertex(stitches[stitches.length - 1]);
-            //     if (vertex.distance(stitches[stitches.length - 1]) < closestVertex.distance(stitches[stitches.length - 1])) {
-            //       closestVertex = vertex;
-            //     }
-            //   }
-            // }
-            // let path = this.findPath(closestVertex, fill[0]);
-
-            let path = this.findPath(stitches[stitches.length - 1], fill[0]);
-            stitches = stitches.concat(Stitch.Math.Polyline.fromObjects(path, false).getResampledBySpacing(this.stitchLength * pixelsPerUnit).vertices);
-          }
-          stitches = stitches.concat(fill);
-          // this.filledPolylines.push(fillLines[this.tour[i].vertex].polyline);
+      for (let i = 0; i < this.autoFills.length; i++) {
+        if (stitches.length > 0) {
+          this.autoFills[i].startPosition = this.autoFills[i].shape[0].getClosestVertex(stitches[stitches.length - 1]);
         }
+        stitches = stitches.concat(this.autoFills[i].getStitches(pixelsPerUnit));
       }
-
-      // let stitches = [];
-
-      // stitches = stitches.concat(this.splitShapes[1].polyline.getResampledBySpacing(pixelsPerUnit).vertices);
-      // for (let shape of this.splitShapes) stitches = stitches.concat(shape.polyline.getResampledBySpacing(pixelsPerUnit).vertices);
-
-      // let fillLines = this.getFillLines(pixelsPerUnit);
-      // // for (let shape of fillLines) {
-      //   let shape = fillLines[1];
-      //   stitches = stitches.concat(shape.polyline.getResampledBySpacing(pixelsPerUnit).vertices);
-      //   for (let line of shape.fillLines) {
-      //     if (line.index % 2 === 0) stitches = stitches.concat([line.intersectionStart, line.intersectionEnd]);
-      //     else stitches = stitches.concat([line.intersectionEnd, line.intersectionStart]);
-      //   }
-      // // }
-
       return stitches;
     }
   }

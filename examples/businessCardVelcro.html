@@ -36,22 +36,22 @@
 			let backgroundThread = pattern.addThread(255, 0, 0);
 			let stitchThread = pattern.addThread(0, 0, 0);
 			let ablesThread = pattern.addThread(0, 0, 255);
-			let appliqueThreads = [pattern.addThread(0, 0, 0), pattern.addThread(0, 0, 0), pattern.addThread(0, 0, 0), pattern.addThread(0, 0, 0)];
-			let borderThread = pattern.addThread(0, 255, 0);
+			let appliqueThreads = [pattern.addThread(), pattern.addThread(), pattern.addThread(), pattern.addThread()];
+			let borderThread = pattern.addThread();
 
 			// the angle of the fills
 			let backgroundAngle = 0.2 * Math.PI;
 			let stitchAngle = 0.1 * Math.PI;
-			let ablesAngles = [0.1 * Math.PI, 0.1 * Math.PI, 0.1 * Math.PI, 0.1 * Math.PI, 0.1 * Math.PI];
+			let ablesAngle = 0.7 * Math.PI;
 
 			// fill params
+			let padding = 12;
 			let underlay = {length: 3, density: 1};
 			let overlay = {length: 3, density: 0.2};
-
-			let padding = 6;
 			let border = Stitch.Math.Polyline.fromArrays([[0, 0], [pattern.width, 0], [pattern.width, pattern.height], [0, pattern.height]], true).getRounded(4 * padding);
 
-			let stitchShapes = [];
+			// create the shapes for each letter in "STITCH" (normal and inset)
+			let [stitchShapes, insetStitchShapes] = [[], []];
 			for (let letter of stitchData.letters) {
 				for (let path of letter.paths) {
 					let polyline = new Stitch.Math.Polyline(true);
@@ -62,12 +62,14 @@
 					}
 					polyline.vertices.reverse();
 					stitchShapes.push(Stitch.CSG.Shape.fromPolylines([polyline]));
+					insetStitchShapes.push(Stitch.CSG.Shape.fromPolylines([polyline.getOffset(-5)]));
 				}
 			}
 
-			let ablesShapes = [];
+			// create the shapes for each letter in "ABLES" (normal and inset)
+			let [ablesShapes, insetAblesShapes] = [[], []];
 			for (let letter of ablesData.letters) {
-				let letterShape;
+				let letterShape, insetLetterShape;
 				for (let i = 0; i < letter.paths.length; i++) {
 					let path = letter.paths[i];
 					let polyline = new Stitch.Math.Polyline(true);
@@ -79,65 +81,66 @@
 					if (i === 0) {
 						polyline.vertices.reverse();
 						letterShape = Stitch.CSG.Shape.fromPolylines([polyline]);
+						insetLetterShape = Stitch.CSG.Shape.fromPolylines([polyline.getOffset(-5)]);
 					} else {
-						letterShape = letterShape.subtract(Stitch.CSG.Shape.fromPolylines([polyline]))
+						letterShape = letterShape.subtract(Stitch.CSG.Shape.fromPolylines([polyline]));
+						insetLetterShape = insetLetterShape.subtract(Stitch.CSG.Shape.fromPolylines([polyline.getOffset(5)]));
 					}
 				}
 				ablesShapes.push(letterShape);
+				insetAblesShapes.push(insetLetterShape);
 			}
 
+			// create the background shape
 			let backgroundShape = Stitch.CSG.Shape.fromPolylines([border.getOffset(-padding)]);
-			for (let shape of stitchShapes) backgroundShape = backgroundShape.subtract(shape);
-			for (let shape of ablesShapes) backgroundShape = backgroundShape.subtract(shape);
+			for (let shape of insetStitchShapes) backgroundShape = backgroundShape.subtract(shape);
+			for (let shape of insetAblesShapes) backgroundShape = backgroundShape.subtract(shape);
 
-			backgroundThread.addRun(new Stitch.Runs.SimpleFill(underlay.length, underlay.density, backgroundAngle, border.getOffset(-padding)));
+			// background underlay
+			backgroundThread.addRun(new Stitch.Runs.SimpleFill(underlay.length, underlay.density, backgroundAngle + 0.5 * Math.PI, border.getOffset(-padding)));
 
+			// background fill (with inset letter holes)
 			let backgroundPolylines = backgroundShape.toPolylines();
 			for (let shape of backgroundPolylines) {
-				backgroundThread.addRun(new Stitch.Runs.SimpleFill(overlay.length, overlay.density, backgroundAngle + 0.5 * Math.PI, shape.polyline, shape.contours));
+				backgroundThread.addRun(new Stitch.Runs.AutoFill([shape.polyline, ...shape.contours], backgroundAngle, overlay.density, overlay.length));
 			}
 
+			// fill for each letter in "STITCH"
 			for (let letterShape of stitchShapes) {
 				let shapePolylines = letterShape.toPolylines();
 				for (let shapePolyline of shapePolylines) {
-					stitchThread.addRun(new Stitch.Runs.SimpleFill(overlay.length, overlay.density, stitchAngle + 0.5 * Math.PI, shapePolyline.polyline, shapePolyline.contours));
+					stitchThread.addRun(new Stitch.Runs.AutoFill([shapePolyline.polyline, ...shapePolyline.contours], stitchAngle, overlay.density, overlay.length));
 				}
 			}
 
-			// for (let letterShape of ablesShapes) {
-			for (let i = 0; i < ablesShapes.length; i++) {
-				let letterShape = ablesShapes[i];
+			// fill for each letter in "ABLES"
+			for (let letterShape of ablesShapes) {
 				let shapePolylines = letterShape.toPolylines();
 				for (let shapePolyline of shapePolylines) {
-					ablesThread.addRun(new Stitch.Runs.SimpleFill(overlay.length, overlay.density, ablesAngles[i] + 0.5 * Math.PI, shapePolyline.polyline, shapePolyline.contours));
+					ablesThread.addRun(new Stitch.Runs.AutoFill([shapePolyline.polyline, ...shapePolyline.contours], ablesAngle, overlay.density, overlay.length));
 				}
 			}
 
 			// 3) on new backing embroider edge
 			appliqueThreads[0].addRun(new Stitch.Runs.Run(2, border.getOffset(-padding)));
 			// 4) place patch on and embroider inset edge (forward and backward)
-			appliqueThreads[1].addRun(new Stitch.Runs.Run(1, border.getOffset(-2 * padding)));
-			// 5) x stitch across inset edge
+			appliqueThreads[1].addRun(new Stitch.Runs.Run(1, border.getOffset(-1.5 * padding)));
+			// // 5) x stitch across inset edge
 			appliqueThreads[2].addRun(new Stitch.Runs.Satin(padding, 4, border.getOffset(-padding)));
-			// 6) remove frame and tape the velcro on the back - repeat step 4
-			appliqueThreads[3].addRun(new Stitch.Runs.Run(1, border.getOffset(-2 * padding)));
-			// remove frame and cut away excess velcro - satin stitch around edge
+			// // 6) remove frame and tape the velcro on the back - repeat step 4
+			appliqueThreads[3].addRun(new Stitch.Runs.Run(1, border.getOffset(-1.5 * padding)));
+			// // remove frame and cut away excess velcro - satin stitch around edge
 			borderThread.addRun(new Stitch.Runs.Satin(2 * padding, 0.2, border.getOffset(-padding)));
-
 
 			// draw the pattern
 			let options = { showStitches: false };
 			let svg = pattern.draw(window.innerWidth, window.innerHeight, options);
-
-			// animate the embroidery
-			// Stitch.Browser.animateSvgElements(svg.querySelectorAll('path'), 20);
-
 			window.addEventListener("resize", Stitch.Browser.debounce(() => { // redraw as window resized
 				svg.remove(); svg = pattern.draw(window.innerWidth, window.innerHeight, options);
 			}));
 
 			// create the download modal and add the event listener
-			let modal = Stitch.Browser.getDownloadModal(pattern, "businessCard", document.body);
+			let modal = Stitch.Browser.getDownloadModal(pattern, "businessCardVelcro", document.body);
 			window.addEventListener("keydown", (e) => { if (e.code === "KeyD") modal.open(); });
 
 			// create the function for stitchables output

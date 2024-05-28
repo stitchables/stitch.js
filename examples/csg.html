@@ -10,12 +10,6 @@
 				return result;
 			}
 			let tokenData = {"hash":random_hash()}
-			// tokenData = {hash: '0x658e26dd870f26993262b95978defbe4fc80fc0f472debe6b42bd7cb03c49c5d'};
-			// tokenData = {hash: '0x498350d4ce75769db37c8beab2acfc64be3cf0d7a426ec28b806851636419181'};
-			// tokenData = {hash: '0x25f4065992ce780ab2f332a6bda185f4635acf06d311b8fc3743f0761761fd22'};
-			// tokenData = {hash: '0x557aa61ccb5179cd86be57a40dba09981e7ee3e886e1f062f6e0d1ea7048cc62'};
-			// tokenData = {hash: '0x6ddcf3883b049407a06a58fa9310c39feac105088b98c510cee69e01207316ed'};
-			console.log(tokenData);
 		</script>
 		<style>
 			svg {
@@ -33,55 +27,47 @@
 			let R = new Stitch.Math.Random(tokenData.hash);
 
 			// create a new pattern
-			let pattern = new Stitch.Pattern(5000, 5000);
+			let pattern = new Stitch.Pattern(500, 500);
 
 			// add the thread
-			let thread = pattern.addThread(0, 0, 0);
+			let blackThread = pattern.addThread(0, 0, 0);
+			let redThread = pattern.addThread(255, 0, 0);
 
 			// create the CSG shapes
-			// let padding = 5;
-			// let csgShapes = [];
-			// for (let i = 0; i < 10; i++) {
-			// 	let r = Stitch.Math.Utils.map(R.random_dec(), 0, 1, 50, 100);
-			// 	let cx = Stitch.Math.Utils.map(R.random_dec(), 0, 1, r + padding, pattern.width - r - padding);
-			// 	let cy = Stitch.Math.Utils.map(R.random_dec(), 0, 1, r + padding, pattern.height - r - padding);
-			// 	let polyline = new Stitch.Math.Polyline(true);
-			// 	for (let a = 0; a < 2 * Math.PI; a += 0.1) polyline.addVertex(r * Math.cos(a) + cx, r * Math.sin(a) + cy);
-			// 	csgShapes.push(Stitch.CSG.Shape.fromPolylines([polyline]));
-			// }
-			// // perform the polygon clipping
-			// let shape = csgShapes[0];
-			// for (let i = 1; i < csgShapes.length; i++) shape = shape.union(csgShapes[i]);
-			// let polylines = shape.toPolylines();
-
-			// create the CSG shapes
-			let countCircles = 10;
+			let countCircles = 20;
 			let csgShapes = [];
 			for (let i = 0; i < countCircles; i++) {
-				let [r, cx, cy] = [Stitch.Math.Utils.map(i, 0, countCircles, 0.45 * Math.min(pattern.width, pattern.height), 0.05 * Math.min(pattern.width, pattern.height)), 0.5 * pattern.width, 0.5 * pattern.height];
+				let radius = R.random_num(0.1 * pattern.width, 0.2 * pattern.width);
+				let cx = R.random_num(radius, pattern.width - radius);
+				let cy = R.random_num(radius, pattern.height - radius);
 				let polyline = new Stitch.Math.Polyline(true);
-				for (let a = 0; a < 2 * Math.PI; a += 0.1) polyline.addVertex(r * Math.cos(a) + cx, r * Math.sin(a) + cy);
-				csgShapes.push(Stitch.CSG.Shape.fromPolylines([polyline]));
+				for (let a = 0; a < 2 * Math.PI; a += 0.1) polyline.addVertex(radius * Math.cos(a) + cx, radius * Math.sin(a) + cy);
+				csgShapes.push(Stitch.CSG.Shape.fromPolylines([polyline.getSimplified(1)]));
 			}
+
 			// perform the polygon clipping
-			let shape = csgShapes[0];
-			for (let i = 1; i < csgShapes.length; i++) shape = (i % 2 === 0) ? shape.union(csgShapes[i]) : shape.subtract(csgShapes[i]);
-			let polylines = shape.toPolylines();
-
-			// create the runs and add them to the thread
-			for (let polyline of polylines) {
-				thread.addRun(new Stitch.Runs.Run(1, polyline.polyline));
-				for (let contour of polyline.contours) {
-					thread.addRun(new Stitch.Runs.Run(1, contour));
-				}
+			let blackShape = csgShapes[0].subtract(csgShapes[1]);
+			let redShape = csgShapes[1].subtract(csgShapes[0]);
+			for (let i = 2; i < csgShapes.length; i++) {
+				blackShape = (i % 2 === 1) ? blackShape.subtract(csgShapes[i]) : blackShape.union(csgShapes[i]);
+				redShape = (i % 2 === 0) ? redShape.subtract(csgShapes[i]) : redShape.union(csgShapes[i]);
 			}
-			for (let polyline of polylines) thread.addRun(new Stitch.Runs.ComplexFill(2, 1, R.random_num(0, Math.PI), polyline.polyline, polyline.contours));
 
+			let blackPolylineShapes = blackShape.toPolylines();
+			for (let polylineShape of blackPolylineShapes) {
+				blackThread.addRun(new Stitch.Runs.AutoFill([polylineShape.polyline, ...polylineShape.contours], R.random_num(0, Math.PI), 0.2, 3));
+			}
+
+			let redPolylineShapes = redShape.toPolylines();
+			for (let polylineShape of redPolylineShapes) {
+				redThread.addRun(new Stitch.Runs.AutoFill([polylineShape.polyline, ...polylineShape.contours], R.random_num(0, Math.PI), 0.2, 3));
+			}
 
 			// draw the pattern
 			let options = { showStitches: false };
 			let svg = pattern.draw(window.innerWidth, window.innerHeight, options);
 			svg.setAttribute("style", "margin: auto; position: absolute; inset: 0;");
+
 			window.addEventListener("resize", Stitch.Browser.debounce(() => { // redraw as window resized
 				svg.remove();
 				svg = pattern.draw(window.innerWidth, window.innerHeight, options);
@@ -89,7 +75,7 @@
 			}));
 
 			// create the download modal and add the event listener
-			let modal = Stitch.Browser.getDownloadModal(pattern, "circlePackSpiral", document.body);
+			let modal = Stitch.Browser.getDownloadModal(pattern, "csg", document.body);
 			window.addEventListener("keydown", (e) => { if (e.code === "KeyD") modal.open(); });
 
 			// create the function for stitchables output

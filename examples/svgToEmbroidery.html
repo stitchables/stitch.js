@@ -207,7 +207,8 @@
       parentElement: embroideryContainer,
       pixelMultiplier: 1,
       minimumPathLength: parseFloat(minPathLengthSlider.value),
-      maximumJoinDistance: parseFloat(maxJoinDistanceSlider.value)
+      maximumJoinDistance: parseFloat(maxJoinDistanceSlider.value),
+      maximumStitchesPerSquareMm: 5
     };
     let pattern = new Stitch.Pattern(0, 0);
 
@@ -267,9 +268,9 @@
     window.addEventListener("keydown", function(event) {
       if (isPatternLoaded) {
         if (event.code === "KeyD") {
-          Stitch.IO.write(pattern, widthMmInput.value, heightMmInput.value, `svgToEmbroidery.dst`, patternOptions.minimumPathLength, patternOptions.maximumJoinDistance);
+          Stitch.IO.write(pattern, widthMmInput.value, heightMmInput.value, `svgToEmbroidery.dst`, patternOptions.minimumPathLength, patternOptions.maximumJoinDistance, patternOptions.maximumStitchesPerSquareMm);
         } else if (event.code === "KeyP") {
-          Stitch.IO.write(pattern, widthMmInput.value, heightMmInput.value, `svgToEmbroidery.pes`, patternOptions.minimumPathLength, patternOptions.maximumJoinDistance);
+          Stitch.IO.write(pattern, widthMmInput.value, heightMmInput.value, `svgToEmbroidery.pes`, patternOptions.minimumPathLength, patternOptions.maximumJoinDistance, patternOptions.maximumStitchesPerSquareMm);
         }
       }
     });
