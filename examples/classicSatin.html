@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+
+	<head>
+		<script src="../stitch.js"></script>
+		<style>
+			svg {
+				margin: auto;
+				position: absolute;
+				inset: 0;
+			}
+		</style>
+	</head>
+
+	<body>
+		<script>
+
+			let quadStrips = [
+				[
+					new Stitch.Math.Vector(805, 1619), new Stitch.Math.Vector(812, 1624), new Stitch.Math.Vector(833, 1553),
+					new Stitch.Math.Vector(853, 1566), new Stitch.Math.Vector(856, 1481), new Stitch.Math.Vector(894, 1499),
+					new Stitch.Math.Vector(875, 1394), new Stitch.Math.Vector(934, 1405), new Stitch.Math.Vector(880, 1319),
+					new Stitch.Math.Vector(950, 1322), new Stitch.Math.Vector(878, 1270), new Stitch.Math.Vector(952, 1267),
+					new Stitch.Math.Vector(866, 1226), new Stitch.Math.Vector(947, 1208), new Stitch.Math.Vector(845, 1177),
+					new Stitch.Math.Vector(930, 1148), new Stitch.Math.Vector(817, 1136), new Stitch.Math.Vector(902, 1088),
+					new Stitch.Math.Vector(787, 1106), new Stitch.Math.Vector(868, 1037), new Stitch.Math.Vector(743, 1070),
+					new Stitch.Math.Vector(816, 979), new Stitch.Math.Vector(675, 1035), new Stitch.Math.Vector(738, 920),
+					new Stitch.Math.Vector(621, 1011), new Stitch.Math.Vector(681, 887), new Stitch.Math.Vector(377, 927),
+					new Stitch.Math.Vector(442, 776), new Stitch.Math.Vector(324, 903), new Stitch.Math.Vector(393, 753),
+					new Stitch.Math.Vector(271, 872), new Stitch.Math.Vector(348, 732), new Stitch.Math.Vector(217, 835),
+					new Stitch.Math.Vector(310, 711), new Stitch.Math.Vector(173, 789), new Stitch.Math.Vector(267, 682),
+					new Stitch.Math.Vector(131, 742), new Stitch.Math.Vector(222, 650), new Stitch.Math.Vector(95, 679),
+					new Stitch.Math.Vector(182, 619), new Stitch.Math.Vector(74, 628), new Stitch.Math.Vector(152, 585),
+					new Stitch.Math.Vector(55, 573), new Stitch.Math.Vector(114, 544), new Stitch.Math.Vector(38, 505),
+					new Stitch.Math.Vector(75, 489), new Stitch.Math.Vector(20, 398), new Stitch.Math.Vector(29, 395)
+				],
+				[
+					new Stitch.Math.Vector(77, 792), new Stitch.Math.Vector(85, 791), new Stitch.Math.Vector(82, 829),
+					new Stitch.Math.Vector(96, 824), new Stitch.Math.Vector(97, 915), new Stitch.Math.Vector(136, 891),
+					new Stitch.Math.Vector(129, 1016), new Stitch.Math.Vector(191, 952), new Stitch.Math.Vector(189, 1115),
+					new Stitch.Math.Vector(256, 993), new Stitch.Math.Vector(258, 1168), new Stitch.Math.Vector(316, 1019),
+					new Stitch.Math.Vector(303, 1189), new Stitch.Math.Vector(355, 1031), new Stitch.Math.Vector(365, 1206),
+					new Stitch.Math.Vector(403, 1046), new Stitch.Math.Vector(420, 1213), new Stitch.Math.Vector(446, 1056),
+					new Stitch.Math.Vector(465, 1214), new Stitch.Math.Vector(483, 1066), new Stitch.Math.Vector(509, 1215),
+					new Stitch.Math.Vector(520, 1076), new Stitch.Math.Vector(562, 1218), new Stitch.Math.Vector(581, 1091),
+					new Stitch.Math.Vector(622, 1225), new Stitch.Math.Vector(654, 1114), new Stitch.Math.Vector(672, 1234),
+					new Stitch.Math.Vector(709, 1145), new Stitch.Math.Vector(728, 1255), new Stitch.Math.Vector(766, 1189),
+					new Stitch.Math.Vector(774, 1289), new Stitch.Math.Vector(813, 1264), new Stitch.Math.Vector(827, 1374),
+					new Stitch.Math.Vector(839, 1370)
+				],
+				[
+					new Stitch.Math.Vector(799, 1543), new Stitch.Math.Vector(806, 1543), new Stitch.Math.Vector(784, 1504),
+					new Stitch.Math.Vector(804, 1501), new Stitch.Math.Vector(767, 1469), new Stitch.Math.Vector(801, 1453),
+					new Stitch.Math.Vector(746, 1442), new Stitch.Math.Vector(786, 1409), new Stitch.Math.Vector(712, 1420),
+					new Stitch.Math.Vector(753, 1352), new Stitch.Math.Vector(686, 1411), new Stitch.Math.Vector(716, 1325),
+					new Stitch.Math.Vector(650, 1405), new Stitch.Math.Vector(672, 1309), new Stitch.Math.Vector(614, 1402),
+					new Stitch.Math.Vector(631, 1301), new Stitch.Math.Vector(576, 1397), new Stitch.Math.Vector(582, 1295),
+					new Stitch.Math.Vector(540, 1387), new Stitch.Math.Vector(550, 1293), new Stitch.Math.Vector(507, 1370),
+					new Stitch.Math.Vector(513, 1289), new Stitch.Math.Vector(466, 1340), new Stitch.Math.Vector(476, 1285),
+					new Stitch.Math.Vector(417, 1284), new Stitch.Math.Vector(421, 1276)
+				]
+			];
+
+			let pattern = new Stitch.Pattern(2000, 2000);
+
+			for (let quadStrip of quadStrips) {
+				let thread = pattern.addThread(255 * Math.random(), 255 * Math.random(), 255 * Math.random());
+				let run = new Stitch.Runs.ClassicSatin(0.4);
+				let mirrorRun = new Stitch.Runs.ClassicSatin(0.4);
+				for (let v of quadStrip) {
+					run.addVector(v);
+					mirrorRun.addVector(new Stitch.Math.Vector(pattern.width - v.x, v.y));
+				}
+				thread.addRun(run);
+				thread.addRun(mirrorRun);
+			}
+
+			let drawOptions = { strokeWidth: 1, showStitches: false };
+			let svg = pattern.draw(window.innerWidth, window.innerHeight, drawOptions);
+
+			window.addEventListener("resize", Stitch.Browser.debounce(() => {
+				svg.remove();
+				svg = pattern.draw(window.innerWidth, window.innerHeight, drawOptions);
+			}, 10));
+
+			let modal = Stitch.Browser.getDownloadModal(pattern, "classicSatin", document.body);
+			window.addEventListener("keydown", (e) => { if (e.code === "KeyD") modal.open(); });
+
+		</script>
+	</body>
+
+</html>

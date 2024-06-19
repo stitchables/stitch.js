@@ -1699,6 +1699,53 @@ Stitch.Runs = {
     }
   },
 
+  ClassicSatin: class {
+    #vertices; #segments;
+    constructor(densityMm = 0.4) {
+      this.densityMm = densityMm;
+      this.#vertices = [];
+      this.#segments = [];
+    }
+    static fromQuadStripVectors(vectors, densityMm = 0.4) {
+      let run = new Stitch.Runs.ClassicSatin(densityMm);
+      for (let i = 0; i < vectors.length; i += 2) { run.addVector(vectors[i]); }
+      return run;
+    }
+    addVertex(x, y) { this.addVector(new Stitch.Math.Vector(x, y)); }
+    addVector(v) {
+      this.#vertices.push(v);
+      let vertexCount = this.#vertices.length;
+      if (vertexCount > 2 && vertexCount % 2 === 0) {
+        this.#segments.push({
+          side0: {
+            startIndex: vertexCount - 4,
+            endIndex: vertexCount - 2,
+            length: this.#vertices[vertexCount - 4].distance(this.#vertices[vertexCount - 2])
+          },
+          side1: {
+            startIndex: vertexCount - 3,
+            endIndex: vertexCount - 1,
+            length: this.#vertices[vertexCount - 3].distance(this.#vertices[vertexCount - 1])
+          }
+        });
+      }
+    }
+    getStitches(pixelsPerMm) {
+      let run = [];
+      run.push(this.#vertices[this.#segments[0].side0.startIndex]);
+      run.push(this.#vertices[this.#segments[0].side1.startIndex]);
+      for (let segment of this.#segments) {
+        let countSamples = Math.ceil(Math.max(segment.side0.length, segment.side1.length) / (this.densityMm * pixelsPerMm));
+        for (let i = 0; i < countSamples; i++) {
+          let w = Stitch.Math.Utils.map(i + 1, 0, countSamples, 0, 1);
+          run.push(this.#vertices[segment.side0.startIndex].lerp(this.#vertices[segment.side0.endIndex], w));
+          run.push(this.#vertices[segment.side1.startIndex].lerp(this.#vertices[segment.side1.endIndex], w));
+        }
+      }
+      return run;
+    }
+  },
+
   // https://github.com/inkstitch/inkstitch/blob/main/lib/stitches/auto_fill.py
   AutoFill: class {
     constructor(shape, angle, rowSpacingMm, stitchSpacingMm, startPosition = null, endPosition = null) {
@@ -1890,7 +1937,7 @@ Stitch.Runs = {
         if (edge.key === "segment") {
           stitches = stitches.concat(this.stitchRow(from, to, pixelsPerMm));
         } else {
-          stitches = stitches.concat(this.findPath(from.position, to.position, 0.5 * this.stitchSpacingMm * pixelsPerMm, 0.1 * this.stitchSpacingMm * pixelsPerMm));
+          stitches = stitches.concat(this.findPath(from.position, to.position, this.stitchSpacingMm * pixelsPerMm, 0.1 * this.stitchSpacingMm * pixelsPerMm));
         }
       }
       return stitches;
@@ -1918,7 +1965,8 @@ Stitch.Runs = {
       }
       return rowStitches;
     }
-    findPath(from, to, maxStepSize, minStepSize) {
+    findPath(from, to, maxStepSize, minStepSize, nLayer = 0, originalStepSize = null) {
+      if (originalStepSize === null) originalStepSize = maxStepSize;
       let queue = [[from]];
       let visited = new Set();
       while (queue.length > 0) {
@@ -1927,20 +1975,63 @@ Stitch.Runs = {
         if (current.distance(to) < 2 * maxStepSize) return path;
         if (!visited.has(current.x + ',' + current.y)) {
           visited.add(current.x + ',' + current.y);
-          let neighbors = [
-            new Stitch.Math.Vector(current.x + maxStepSize, current.y),
-            new Stitch.Math.Vector(current.x - maxStepSize, current.y),
-            new Stitch.Math.Vector(current.x, current.y + maxStepSize),
-            new Stitch.Math.Vector(current.x, current.y - maxStepSize),
-            new Stitch.Math.Vector(current.x + maxStepSize, current.y + maxStepSize),
-            new Stitch.Math.Vector(current.x - maxStepSize, current.y - maxStepSize),
-            new Stitch.Math.Vector(current.x + maxStepSize, current.y - maxStepSize),
-            new Stitch.Math.Vector(current.x - maxStepSize, current.y + maxStepSize)
-          ];
-          // let neighbors = [];
-          // for (let i = 0; i < 20; i++) {
-          //   neighbors.push(current.add(Stitch.Math.Vector.fromAngle(Stitch.Math.Utils.map(i, 0, 20, 0, 2 * Math.PI)).multiply(maxStepSize)));
-          // }
+          // let neighbors = [
+          //   new Stitch.Math.Vector(current.x + maxStepSize, current.y              ),
+          //   new Stitch.Math.Vector(current.x - maxStepSize, current.y              ),
+          //   new Stitch.Math.Vector(current.x              , current.y + maxStepSize),
+          //   new Stitch.Math.Vector(current.x              , current.y - maxStepSize),
+          //   new Stitch.Math.Vector(current.x + maxStepSize, current.y + maxStepSize),
+          //   new Stitch.Math.Vector(current.x - maxStepSize, current.y - maxStepSize),
+          //   new Stitch.Math.Vector(current.x + maxStepSize, current.y - maxStepSize),
+          //   new Stitch.Math.Vector(current.x - maxStepSize, current.y + maxStepSize)
+          // ];
+          let neighbors = [];
+          if (nLayer === 0) {
+            neighbors = [
+              new Stitch.Math.Vector(current.x + maxStepSize, current.y              ),
+              new Stitch.Math.Vector(current.x - maxStepSize, current.y              ),
+              new Stitch.Math.Vector(current.x              , current.y + maxStepSize),
+              new Stitch.Math.Vector(current.x              , current.y - maxStepSize)
+            ];
+          } else if (nLayer === 1) {
+            neighbors = [
+              new Stitch.Math.Vector(current.x + maxStepSize, current.y + maxStepSize),
+              new Stitch.Math.Vector(current.x - maxStepSize, current.y - maxStepSize),
+              new Stitch.Math.Vector(current.x + maxStepSize, current.y - maxStepSize),
+              new Stitch.Math.Vector(current.x - maxStepSize, current.y + maxStepSize)
+            ];
+          } else if (nLayer === 2) {
+            neighbors = [
+              new Stitch.Math.Vector(current.x - 0.5 * maxStepSize, current.y + maxStepSize),
+              new Stitch.Math.Vector(current.x + 0.5 * maxStepSize, current.y - maxStepSize),
+              new Stitch.Math.Vector(current.x - 0.5 * maxStepSize, current.y - maxStepSize),
+              new Stitch.Math.Vector(current.x + 0.5 * maxStepSize, current.y + maxStepSize),
+              new Stitch.Math.Vector(current.x + maxStepSize, current.y - 0.5 * maxStepSize),
+              new Stitch.Math.Vector(current.x - maxStepSize, current.y + 0.5 * maxStepSize),
+              new Stitch.Math.Vector(current.x - maxStepSize, current.y - 0.5 * maxStepSize),
+              new Stitch.Math.Vector(current.x + maxStepSize, current.y + 0.5 * maxStepSize),
+            ];
+          } else if (nLayer === 3) {
+            neighbors = [
+              new Stitch.Math.Vector(current.x - 0.25 * maxStepSize, current.y + maxStepSize),
+              new Stitch.Math.Vector(current.x + 0.25 * maxStepSize, current.y - maxStepSize),
+              new Stitch.Math.Vector(current.x - 0.25 * maxStepSize, current.y - maxStepSize),
+              new Stitch.Math.Vector(current.x + 0.25 * maxStepSize, current.y + maxStepSize),
+              new Stitch.Math.Vector(current.x + maxStepSize, current.y - 0.25 * maxStepSize),
+              new Stitch.Math.Vector(current.x - maxStepSize, current.y + 0.25 * maxStepSize),
+              new Stitch.Math.Vector(current.x - maxStepSize, current.y - 0.25 * maxStepSize),
+              new Stitch.Math.Vector(current.x + maxStepSize, current.y + 0.25 * maxStepSize),
+              new Stitch.Math.Vector(current.x - 0.75 * maxStepSize, current.y + maxStepSize),
+              new Stitch.Math.Vector(current.x + 0.75 * maxStepSize, current.y - maxStepSize),
+              new Stitch.Math.Vector(current.x - 0.75 * maxStepSize, current.y - maxStepSize),
+              new Stitch.Math.Vector(current.x + 0.75 * maxStepSize, current.y + maxStepSize),
+              new Stitch.Math.Vector(current.x + maxStepSize, current.y - 0.75 * maxStepSize),
+              new Stitch.Math.Vector(current.x - maxStepSize, current.y + 0.75 * maxStepSize),
+              new Stitch.Math.Vector(current.x - maxStepSize, current.y - 0.75 * maxStepSize),
+              new Stitch.Math.Vector(current.x + maxStepSize, current.y + 0.75 * maxStepSize),
+            ];
+          }
+
           for (const neighbor of neighbors) {
             if (this.shape[0].containsPoint(neighbor)) {
               let checkContours = true;
@@ -1967,7 +2058,8 @@ Stitch.Runs = {
           }
         }
       }
-      if (maxStepSize > minStepSize) return this.findPath(from, to, 0.5 * maxStepSize, minStepSize);
+      if (maxStepSize > minStepSize) return this.findPath(from, to, 0.5 * maxStepSize, minStepSize, nLayer, originalStepSize);
+      if (nLayer < 1) return this.findPath(from, to, originalStepSize, minStepSize, nLayer + 1, originalStepSize);
       console.log("no path found");
       return [];
     }
