@@ -8,6 +8,7 @@
   <style>
     body {
       margin: 0;
+      background-color: grey;
     }
     #ui {
       width: 100vw;
@@ -316,6 +317,15 @@
     function convertToOptimizedEmbroidery(resampleSize, minPathLength, maxJoinDistance) {
       pattern = new Stitch.Pattern(svgWidth, svgHeight);
       let threads = {};
+
+      // let borderThread = pattern.addThread(0, 0, 0);
+      // let borderPointArray = [[0, 0], [pattern.width, 0], [pattern.width, pattern.height], [0, pattern.height]];
+      // let borderPolyline = Stitch.Math.Polyline.fromArrays(borderPointArray, true);
+      // let insetBorderPolyline = borderPolyline.getOffset(-2);
+      // let roundedBorderPolyline = insetBorderPolyline.getRounded(5);
+      // let borderRun = new Stitch.Runs.Run(1.5, roundedBorderPolyline);
+      // borderThread.addRun(borderRun);
+
       originalPathCount.textContent = svgPaths.length;
       for (let path of svgPaths) {
         let strokeColor = window.getComputedStyle(path).stroke;
@@ -326,14 +336,16 @@
           }
           let thread = threads[strokeColor];
           let totalLength = path.getTotalLength();
-          let polyline = new Stitch.Math.Polyline(false);
-          for (let i = 0; i < totalLength; i += resampleSize) {
-            let point = path.getPointAtLength(i);
+          if (totalLength > minPathLength) {
+            let polyline = new Stitch.Math.Polyline(false);
+            for (let i = 0; i < totalLength; i += resampleSize) {
+              let point = path.getPointAtLength(i);
+              polyline.addVertex(point.x - svgXPos, point.y - svgYPos);
+            }
+            let point = path.getPointAtLength(totalLength);
             polyline.addVertex(point.x - svgXPos, point.y - svgYPos);
+            thread.addRun(new Stitch.Runs.Run(resampleSize, polyline));
           }
-          let point = path.getPointAtLength(totalLength);
-          polyline.addVertex(point.x - svgXPos, point.y - svgYPos);
-          thread.addRun(new Stitch.Runs.Run(resampleSize, polyline));
         }
       }
       drawEmbroidery();

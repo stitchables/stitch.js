@@ -106,10 +106,12 @@ Stitch.Pattern = class {
         t.runs = [];
         for (let joinedPolyline of joinedPolylines) {
           let run = [];
-          for (let v of joinedPolyline.vertices) {
-            run.push(new Stitch.Math.Vector(v.x, v.y));
+          if (joinedPolyline) {
+            for (let v of joinedPolyline.vertices) {
+              run.push(new Stitch.Math.Vector(v.x, v.y));
+            }
+            t.runs.push(run);
           }
-          t.runs.push(run);
         }
       }
     }
@@ -190,14 +192,16 @@ Stitch.Optimize = {
         let currentEnd = joinedPolylines[joinedPolylines.length - 1].vertices[joinedPolylines[joinedPolylines.length - 1].vertices.length - 1];
         let nextStart = polyline.vertices[0];
         let nextEnd = polyline.vertices[polyline.vertices.length - 1];
-        let [dcsns, dcsne, dcens, dcene] = [currentStart.distance(nextStart), currentStart.distance(nextEnd), currentEnd.distance(nextStart), currentEnd.distance(nextEnd)];
-        let d = Math.min(dcsns, dcsne, dcens, dcene);
-        if (d < minDistance) {
-          [nextPolyline, queueIndex, minDistance] = [polyline, i, d];
-          reverseFlag = (Math.min(dcsns, dcene) < Math.min(dcsne, dcens)) ? true : false;
-          frontAppendFlag = (Math.min(dcsns, dcsne) < Math.min(dcens, dcene)) ? true : false;
+        if (currentStart, currentEnd, nextStart, nextEnd) {
+          let [dcsns, dcsne, dcens, dcene] = [currentStart.distance(nextStart), currentStart.distance(nextEnd), currentEnd.distance(nextStart), currentEnd.distance(nextEnd)];
+          let d = Math.min(dcsns, dcsne, dcens, dcene);
+          if (d < minDistance) {
+            [nextPolyline, queueIndex, minDistance] = [polyline, i, d];
+            reverseFlag = (Math.min(dcsns, dcene) < Math.min(dcsne, dcens)) ? true : false;
+            frontAppendFlag = (Math.min(dcsns, dcsne) < Math.min(dcens, dcene)) ? true : false;
+          }
+          done = false;
         }
-        done = false;
       }
       if (minDistance < maxJoinDistance) {
         if (reverseFlag) nextPolyline.vertices.reverse();
@@ -1730,19 +1734,67 @@ Stitch.Runs = {
         });
       }
     }
+    // getStitches(pixelsPerMm) {
+    //   let run = [];
+    //   run.push(this.#vertices[this.#segments[0].side0.startIndex]);
+    //   run.push(this.#vertices[this.#segments[0].side1.startIndex]);
+    //   for (let segment of this.#segments) {
+    //     let countSamples = Math.ceil(Math.max(segment.side0.length, segment.side1.length) / (this.densityMm * pixelsPerMm));
+    //     for (let i = 0; i < countSamples; i++) {
+    //       let w = Stitch.Math.Utils.map(i + 1, 0, countSamples, 0, 1);
+    //       run.push(this.#vertices[segment.side0.startIndex].lerp(this.#vertices[segment.side0.endIndex], w));
+    //       run.push(this.#vertices[segment.side1.startIndex].lerp(this.#vertices[segment.side1.endIndex], w));
+    //     }
+    //   }
+    //   return run;
+    // }
     getStitches(pixelsPerMm) {
-      let run = [];
-      run.push(this.#vertices[this.#segments[0].side0.startIndex]);
-      run.push(this.#vertices[this.#segments[0].side1.startIndex]);
+
+      let runOdd = [];
+      let runEven = [];
+      let runCenter = [];
+
+      let a = this.#vertices[this.#segments[0].side0.startIndex];
+      let b = this.#vertices[this.#segments[0].side1.startIndex];
+      let c = a.add(b).multiply(0.5);
+      runOdd.push(a);
+      runEven.push(b);
+      runCenter.push(c);
+
+      let stepSize = 0;
       for (let segment of this.#segments) {
-        let countSamples = Math.ceil(Math.max(segment.side0.length, segment.side1.length) / (this.densityMm * pixelsPerMm));
-        for (let i = 0; i < countSamples; i++) {
-          let w = Stitch.Math.Utils.map(i + 1, 0, countSamples, 0, 1);
-          run.push(this.#vertices[segment.side0.startIndex].lerp(this.#vertices[segment.side0.endIndex], w));
-          run.push(this.#vertices[segment.side1.startIndex].lerp(this.#vertices[segment.side1.endIndex], w));
+
+        let aNext = this.#vertices[segment.side0.startIndex];
+        let bNext = this.#vertices[segment.side1.startIndex];
+        let cNext = aNext.add(bNext).multiply(0.5);
+
+        if (c.distance(cNext) + stepSize > this.densityMm * pixelsPerMm) {
+          if (runCenter.length % 2 === 0) {
+            runOdd.push(aNext);
+            runEven.push(bNext);
+          } else {
+            runOdd.push(bNext);
+            runEven.push(aNext);
+          }
+          runCenter.push(cNext);
+          stepSize = 0;
+        } else {
+          stepSize += c.distance(cNext);
         }
+
+        a = aNext;
+        b = bNext;
+        c = cNext;
       }
-      return run;
+      if (runCenter.length % 2 === 0) {
+        runOdd.push(a);
+        runEven.push(b);
+      } else {
+        runOdd.push(b);
+        runEven.push(a);
+      }
+      runCenter.push(c);
+      return runCenter.length > 2 ? [...runCenter, ...runOdd.reverse(), ...runEven, ...runCenter.reverse()] : [];
     }
   },
 

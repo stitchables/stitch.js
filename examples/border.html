@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+
+	<head>
+		<script src="../stitch.js"></script>
+		<style>
+			svg {
+				margin: auto;
+				position: absolute;
+				inset: 0;
+			}
+		</style>
+	</head>
+
+	<body>
+		<script>
+
+			let pattern = new Stitch.Pattern(1400, 2300);
+
+			let thread = pattern.addThread(0, 0, 0);
+
+			let borderPointArray = [[0, 0], [pattern.width, 0], [pattern.width, pattern.height], [0, pattern.height]];
+			let borderPolyline = Stitch.Math.Polyline.fromArrays(borderPointArray, true);
+			let insetBorderPolyline = borderPolyline.getOffset(-15);
+			let roundedBorderPolyline = insetBorderPolyline.getRounded(50);
+			let borderRun = new Stitch.Runs.Satin(30, 0.2, roundedBorderPolyline);
+			thread.addRun(borderRun);
+
+			let drawOptions = { strokeWidth: 1, showStitches: false };
+			let svg = pattern.draw(window.innerWidth, window.innerHeight, drawOptions);
+			/****************************************************************************/
+
+			/************** redraw the pattern when the window is resized ***************/
+			/* Stitch.js provides many useful browser centeric utility functions. Here  */
+			/* we use the debounce() function to only redraw the pattern every 10 ms -  */
+			/* useful for computationally intensive patterns                            */
+			window.addEventListener("resize", Stitch.Browser.debounce(() => {
+				svg.remove();
+				svg = pattern.draw(window.innerWidth, window.innerHeight, drawOptions);
+			}, 10));
+			/****************************************************************************/
+
+			/**************************** animate the pattern ***************************/
+			/* another helpful browser centric utility is the animateSvgElements()      */
+			/* function. This can use useful to visually see how the pattern will       */
+			/* stitch out. Uncomment below to activate.                                 */
+			// Stitch.Browser.animateSvgElements(svg.querySelectorAll('path'), 20);
+			/****************************************************************************/
+
+			/************************* create a download modal **************************/
+			/* another useful browser utility is the download modal - this is a window  */
+			/* that will pop up and prompt the user for the various parameters needed   */
+			/* to output an embroidery file: file type, dimensions, etc.                */
+			let modal = Stitch.Browser.getDownloadModal(pattern, "basicExample", document.body);
+			/****************************************************************************/
+
+			/*********************** add key press event listener ***********************/
+			/* here we create the "keydown" event listener in order to initiate various */
+			/* processes. In this case:                                                 */
+			/*   - The "D" key will open up the download modal created above.           */
+			/*   - the "1" key will directly download a .dst file with small dimensions */
+			/*   - the "2" key will directly download a .dst file with medium dimensions*/
+			/*   - the "3" key will directly download a .dst file with large dimensions */
+			window.addEventListener("keydown", (e) => {
+				if (e.code === "KeyD") {
+					modal.open();
+				} else if (e.code === "Digit1") {
+					Stitch.IO.write(pattern, Stitch.Units.inToMm(1.75), Stitch.Units.inToMm(1), `basicExampleSmall.dst`);
+				} else if (e.code === "Digit2") {
+					Stitch.IO.write(pattern, Stitch.Units.inToMm(3.5), Stitch.Units.inToMm(2), `basicExampleMedium.dst`);
+				} else if (e.code === "Digit3") {
+					Stitch.IO.write(pattern, Stitch.Units.inToMm(7), Stitch.Units.inToMm(4), `basicExampleLarge.dst`);
+				} else {
+					console.log(`Unmapped key pressed: Code ${e.code}.`);
+				}
+			});
+			/****************************************************************************/
+
+			/**************** create the function for stitchables output ****************/
+			/* stitchables.io is currently setup to use a backend embroidery pattern    */
+			/* converter and requires this function in order to work properly.          */
+			function generateEmbroiderySVG(width, height) {
+				return Stitch.Browser.serializeToString(pattern.getSvg(width, height));
+			}
+			/****************************************************************************/
+
+		</script>
+	</body>
+
+</html>
